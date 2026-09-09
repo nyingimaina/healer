@@ -214,6 +214,23 @@ actually reach an already-configured box, on a real version upgrade or a same-ve
 alike. Fixed by having the upgrade branch also re-copy `/opt/healer/healer.service` to
 `/etc/systemd/system/` and `daemon-reload` before restarting, whenever the unit is already present.
 
+**These same bugs also shipped, independently, in the GitHub Actions tarball path
+(`.github/workflows/release.yml` + `bootstrap.sh`)** — a real install via that path failed with
+`The application to execute does not exist: '/opt/healer/healer-setup.dll'` (the missing
+`PublishSingleFile` bug) even though `build-deb.sh` had already been fixed. The two packaging paths
+had simply drifted apart: `build-deb.sh` got all three fixes above when they were found, but nobody
+had ported the same three changes to `release.yml`, which builds its own tarball independently
+rather than reusing `build-deb.sh`. `release.yml`'s `Publish Healer.Setup`/`Healer.Status` steps and
+its `Package release tarball` step now carry the identical `PublishSingleFile` +
+`IncludeNativeLibrariesForSelfExtract` + `.bin`-rename-plus-wrapper-script +
+`libe_sqlite3.so`-copy treatment, verbatim in spirit if not in exact shell syntax (the release
+workflow builds the wrapper scripts with `printf`, not a heredoc, since a `<<EOF` heredoc's closing
+delimiter must have zero leading whitespace — awkward to guarantee inside an indented YAML `run: |`
+block). **The lesson, not just the fix**: two independent packaging scripts for the same three
+binaries is a real maintenance hazard — a fix applied to one silently does not apply to the other.
+If a third packaging path is ever added, prefer extracting the shared "assemble the payload
+directory" logic into one script both paths call, rather than copy-pasting it a third time.
+
 ## Scheduled docker-compose restarts
 
 A second, independent scheduling mechanism alongside scheduled host/container reboots

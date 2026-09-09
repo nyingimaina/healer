@@ -54,7 +54,8 @@ mkdir -p "$INSTALL_DIR"
 curl -fsSL "$HEALER_RELEASE_BASE_URL/healer-$RID.tar.gz" -o /tmp/healer-release.tar.gz
 tar -xzf /tmp/healer-release.tar.gz -C "$INSTALL_DIR"
 rm -f /tmp/healer-release.tar.gz
-chmod +x "$INSTALL_DIR/healer" "$INSTALL_DIR/healer-setup" "$INSTALL_DIR/healer-status" 2>/dev/null || true
+chmod +x "$INSTALL_DIR/healer" "$INSTALL_DIR/healer-setup" "$INSTALL_DIR/healer-status" \
+    "$INSTALL_DIR/healer-setup.bin" "$INSTALL_DIR/healer-status.bin" 2>/dev/null || true
 
 # Convenience: `healer-setup`/`healer-status` from anywhere, not the full /opt/healer/ path.
 ln -sf "$INSTALL_DIR/healer-setup" /usr/local/bin/healer-setup

@@ -41,22 +41,53 @@ jobs:
           --self-contained true -p:PublishAot=true -o publish/host
 
       - name: Publish Healer.Setup
+        # PublishSingleFile + IncludeNativeLibrariesForSelfExtract, matching deploy/build-deb.sh —
+        # without these, "--self-contained true" alone produces ~220 loose files (the apphost plus
+        # every runtime/dependency DLL and native library), and packaging only the named executable
+        # (as this step used to) ships a binary missing everything it needs to actually run. This
+        # exact gap shipped once already and broke a real install ("The application to execute does
+        # not exist: '/opt/healer/healer-setup.dll'") before being caught here.
         run: >
           dotnet publish src/Healer.Setup -c Release -r ${{ matrix.rid }}
-          --self-contained true -o publish/setup
+          --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish/setup
 
       - name: Publish Healer.Status
         run: >
           dotnet publish src/Healer.Status -c Release -r ${{ matrix.rid }}
-          --self-contained true -o publish/status
+          --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish/status
 
       - name: Package release tarball
         run: |
           set -e
           STAGE="$(mktemp -d)"
+
           cp publish/host/healer "$STAGE/"
-          cp publish/setup/healer-setup "$STAGE/"
-          cp publish/status/healer-status "$STAGE/"
+          # Native AOT only compiles MANAGED code to native — SQLite's C library does NOT get
+          # folded into the single `healer` executable and still ships as its own .so file next to
+          # it. Missing this is exactly what caused "sqlite error 14: unable to open database file"
+          # at runtime the first time this was packaged for the .deb path (see docs/ARCHITECTURE.md).
+          cp publish/host/libe_sqlite3.so "$STAGE/"
+          chmod 755 "$STAGE/libe_sqlite3.so"
+
+          # healer-setup/healer-status are PublishSingleFile + IncludeNativeLibrariesForSelfExtract
+          # bundles — at every run they need to extract their native libraries to a writable
+          # directory, and .NET's automatic fallback search for that directory (HOME, TMPDIR, etc.)
+          # is not reliable across the different contexts these run in (root via bootstrap.sh, a
+          # plain sudo shell, healer-first-run.sh). Pin an explicit, always-writable extraction
+          # directory instead: rename the real executables to `.bin` and ship a thin wrapper script
+          # under the original name that sets DOTNET_BUNDLE_EXTRACT_BASE_DIR before exec-ing it —
+          # the same fix already proven in deploy/build-deb.sh.
+          mkdir -p "$STAGE/.extract"
+          chmod 1777 "$STAGE/.extract"
+          cp publish/setup/healer-setup "$STAGE/healer-setup.bin"
+          cp publish/status/healer-status "$STAGE/healer-status.bin"
+          chmod 755 "$STAGE/healer-setup.bin" "$STAGE/healer-status.bin"
+          for name in healer-setup healer-status; do
+            printf '#!/bin/sh\nexport DOTNET_BUNDLE_EXTRACT_BASE_DIR="/opt/healer/.extract"\nexec "/opt/healer/%s.bin" "$@"\n' "$name" > "$STAGE/$name"
+          done
+
           cp deploy/healer.service "$STAGE/"
           cp deploy/healer-first-run.sh "$STAGE/"
           chmod +x "$STAGE/healer" "$STAGE/healer-setup" "$STAGE/healer-status" "$STAGE/healer-first-run.sh"
