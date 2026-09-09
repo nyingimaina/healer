@@ -342,12 +342,23 @@ every time you want an updated build.
    ```sh
    cd /mnt/d/work/nyingi/code/systems/healer
    dotnet publish src/Healer.Host -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o publish/host
-   dotnet publish src/Healer.Setup -c Release -r linux-x64 --self-contained true -o publish/setup
-   dotnet publish src/Healer.Status -c Release -r linux-x64 --self-contained true -o publish/status
+   dotnet publish src/Healer.Setup -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/setup
+   dotnet publish src/Healer.Status -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/status
    mkdir -p publish/bundle
-   cp publish/host/healer publish/setup/healer-setup publish/status/healer-status deploy/healer.service deploy/healer-first-run.sh publish/bundle/
-   chmod +x publish/bundle/healer publish/bundle/healer-setup publish/bundle/healer-status publish/bundle/healer-first-run.sh
+   cp publish/host/healer publish/host/libe_sqlite3.so deploy/healer.service deploy/healer-first-run.sh publish/bundle/
+   cp publish/setup/healer-setup publish/bundle/healer-setup.bin
+   cp publish/status/healer-status publish/bundle/healer-status.bin
+   for name in healer-setup healer-status; do
+     printf '#!/bin/sh\nexport DOTNET_BUNDLE_EXTRACT_BASE_DIR="/opt/healer/.extract"\nexec "/opt/healer/%s.bin" "$@"\n' "$name" > "publish/bundle/$name"
+   done
+   chmod +x publish/bundle/healer publish/bundle/libe_sqlite3.so publish/bundle/healer-setup publish/bundle/healer-status publish/bundle/healer-setup.bin publish/bundle/healer-status.bin publish/bundle/healer-first-run.sh
    ```
+   (`PublishSingleFile`/`IncludeNativeLibrariesForSelfExtract` bundle Setup/Status into one real
+   executable each instead of ~200 loose files; `libe_sqlite3.so` is the daemon's native SQLite
+   dependency, which Native AOT doesn't fold into `healer` itself; the wrapper scripts pin where
+   Setup/Status extract their native libraries to at runtime, since .NET's automatic fallback for
+   that isn't reliable across different invocation contexts. All three are load-bearing — see
+   `docs/ARCHITECTURE.md` if you're curious why.)
    This works because WSL runs a genuine Linux kernel (not a translation layer), and since almost
    every Windows PC is an x64/amd64 machine, that's an x64 Linux kernel — so `linux-x64` here is a
    same-architecture native build, not a cross-compile, exactly like building it on a real Ubuntu box.
@@ -373,15 +384,18 @@ every time you want an updated build.
 5. **Install it on the server** — connect (Part 4 — from this same WSL window, `ssh` works exactly
    as it did to run `scp` above), then:
    ```sh
-   sudo mkdir -p /opt/healer
+   sudo mkdir -p /opt/healer /opt/healer/.extract
+   sudo chmod 1777 /opt/healer/.extract
    sudo cp /tmp/healer-bundle/* /opt/healer/
-   sudo chmod +x /opt/healer/healer /opt/healer/healer-setup /opt/healer/healer-status
-   sudo ln -sf /opt/healer/healer-setup /usr/local/bin/healer-setup
-   sudo ln -sf /opt/healer/healer-status /usr/local/bin/healer-status
+   sudo chmod +x /opt/healer/healer /opt/healer/libe_sqlite3.so /opt/healer/healer-setup /opt/healer/healer-status /opt/healer/healer-setup.bin /opt/healer/healer-status.bin
+   sudo ln -sf /opt/healer/healer-setup /usr/bin/healer-setup
+   sudo ln -sf /opt/healer/healer-status /usr/bin/healer-status
    sudo cp /opt/healer/healer-first-run.sh /etc/profile.d/healer-first-run.sh
    sudo chmod +x /etc/profile.d/healer-first-run.sh
    sudo healer-setup
    ```
+   (`/usr/bin`, not `/usr/local/bin` — confirmed by a real install where `/usr/local/bin` wasn't on
+   every box's `PATH`/`sudo` `secure_path`; `/usr/bin` always is.)
 
 Follow the same wizard steps as Part 6 above from here on.
 

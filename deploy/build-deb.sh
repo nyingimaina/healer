@@ -58,7 +58,7 @@ dotnet publish src/Healer.Status -c Release -r linux-x64 --self-contained true \
 
 echo "== Assembling package tree at $PKGROOT =="
 rm -rf "$PKGROOT"
-mkdir -p "$PKGROOT/DEBIAN" "$PKGROOT/opt/healer" "$PKGROOT/opt/healer/.extract" "$PKGROOT/etc/profile.d" "$PKGROOT/usr/local/bin"
+mkdir -p "$PKGROOT/DEBIAN" "$PKGROOT/opt/healer" "$PKGROOT/opt/healer/.extract" "$PKGROOT/etc/profile.d" "$PKGROOT/usr/bin"
 chmod 755 "$PKGROOT/DEBIAN" # dpkg-deb requires exactly 0755-0775; belt-and-braces given the note above.
 # 1777 (world-writable + sticky bit, same as /tmp) because healer-setup/healer-status run as many
 # different users across their various call sites (root during postinst, root or a human via
@@ -84,8 +84,8 @@ chmod 755 "$PKGROOT/opt/healer/libe_sqlite3.so"
 # extraction directory rather than depend on that guesswork: rename the real executables to
 # `.bin`, and ship a thin wrapper script under the original name that sets
 # DOTNET_BUNDLE_EXTRACT_BASE_DIR before exec-ing it. Every existing call site (postinst,
-# healer-first-run.sh, and the /usr/local/bin symlinks) invokes healer-setup/healer-status by
-# their original name, so this fix applies everywhere with no changes needed anywhere else.
+# healer-first-run.sh, and the /usr/bin symlinks) invokes healer-setup/healer-status by their
+# original name, so this fix applies everywhere with no changes needed anywhere else.
 cp publish/setup/healer-setup "$PKGROOT/opt/healer/healer-setup.bin"
 cp publish/status/healer-status "$PKGROOT/opt/healer/healer-status.bin"
 chmod 755 "$PKGROOT/opt/healer/healer-setup.bin" "$PKGROOT/opt/healer/healer-status.bin"
@@ -109,8 +109,15 @@ chmod 755 "$PKGROOT/opt/healer/healer" "$PKGROOT/opt/healer/healer-setup" \
     "$PKGROOT/opt/healer/healer-status" "$PKGROOT/etc/profile.d/healer-first-run.sh"
 chmod 644 "$PKGROOT/opt/healer/healer.service"
 
-ln -sf /opt/healer/healer-setup "$PKGROOT/usr/local/bin/healer-setup"
-ln -sf /opt/healer/healer-status "$PKGROOT/usr/local/bin/healer-status"
+# /usr/bin, NOT /usr/local/bin: a real install via the tarball path (deploy/bootstrap.sh, which
+# used /usr/local/bin at the time) reported "command not found" for both plain and `sudo`-prefixed
+# invocations despite the symlink existing, because that box's PATH/sudo secure_path didn't include
+# /usr/local/bin. /usr/bin is unconditionally on every PATH and every sudo secure_path. This is also
+# now the Debian-Policy-correct location (§9.1.2 reserves /usr/local for the sysadmin's own,
+# non-package-managed installs) — fixing the real bug also happens to fix a pre-existing, previously
+# accepted policy deviation.
+ln -sf /opt/healer/healer-setup "$PKGROOT/usr/bin/healer-setup"
+ln -sf /opt/healer/healer-status "$PKGROOT/usr/bin/healer-status"
 
 echo "== Writing package metadata =="
 INSTALLED_SIZE_KB=$(du -sk --exclude="$PKGROOT/DEBIAN" "$PKGROOT" 2>/dev/null | cut -f1 || echo 0)

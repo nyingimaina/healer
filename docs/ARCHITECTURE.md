@@ -228,8 +228,28 @@ workflow builds the wrapper scripts with `printf`, not a heredoc, since a `<<EOF
 delimiter must have zero leading whitespace — awkward to guarantee inside an indented YAML `run: |`
 block). **The lesson, not just the fix**: two independent packaging scripts for the same three
 binaries is a real maintenance hazard — a fix applied to one silently does not apply to the other.
-If a third packaging path is ever added, prefer extracting the shared "assemble the payload
-directory" logic into one script both paths call, rather than copy-pasting it a third time.
+
+**That "third path" warning turned out to already exist and already have drifted**: the exact same
+three-part bug (no `PublishSingleFile`, no `libe_sqlite3.so`, no extraction-dir wrapper) was also
+present, independently, in `docs/DEPLOY-FROM-WINDOWS.md`'s "Option B" manual copy-paste
+instructions — a THIRD hand-maintained copy of the same publish/package logic that nobody had
+walked through end-to-end either. Fixed the same way. At three independent copies of this logic
+(`build-deb.sh`, `release.yml`, and now a markdown doc), the case for actually extracting a single
+shared "assemble the payload" script all three call — rather than a fourth copy-paste — is no
+longer hypothetical.
+
+**A fourth real bug, found the same way (a real install, not code review): `/usr/local/bin` is not
+reliably on every box's `PATH`, or on `sudo`'s own `secure_path`.** A real EC2 box reported
+`healer-status: command not found` for both a plain and a `sudo`-prefixed invocation, immediately
+after a successful install, even though `/usr/local/bin/healer-status` existed as a valid symlink —
+only the full absolute path worked. `/usr/local/bin` being on `PATH` is a *convention*, not a
+guarantee, and evidently isn't universal across every AMI/hardening profile. `/usr/bin` is: it's
+where core system commands themselves live, so every shell's `PATH` and every `sudo`
+`secure_path` includes it unconditionally, with no known exceptions. All three packaging paths
+(`build-deb.sh`, `bootstrap.sh`, and the Option B doc) now symlink there instead — which also
+happens to resolve a pre-existing, previously-accepted Debian Policy §9.1.2 deviation (packages
+aren't supposed to install into `/usr/local` at all, which is reserved for the sysadmin's own,
+non-package-managed installs) as a side effect of fixing the real bug.
 
 ## Scheduled docker-compose restarts
 
