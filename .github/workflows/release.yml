@@ -74,11 +74,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
+      # actions/checkout MUST run before download-artifact: checkout defaults to `clean: true`,
+      # which runs `git clean -ffdx` on the workspace before checking out — that wipes any
+      # untracked files already there, including a dist/ directory download-artifact had just
+      # populated, if checkout ran second. This exact ordering bug was the cause of a real CI
+      # failure ("find: 'dist': No such file or directory") — download-artifact succeeded, but
+      # checkout silently deleted its output one step later.
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
@@ -87,6 +88,11 @@ jobs:
             10.0.x
       - name: Run the test suite one more time before publishing
         run: dotnet test Healer.slnx
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Create GitHub Release
         env:
