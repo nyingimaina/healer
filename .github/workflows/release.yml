@@ -91,4 +91,13 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/*.tar.gz --title "${{ github.ref_name }}" --generate-notes
+        run: |
+          set -e
+          echo "Downloaded artifact layout:"
+          find dist -type f
+          mapfile -t TARBALLS < <(find dist -type f -name '*.tar.gz')
+          if [ "${#TARBALLS[@]}" -eq 0 ]; then
+            echo "::error::No .tar.gz files found anywhere under dist/ — see the file listing above." >&2
+            exit 1
+          fi
+          gh release create "${{ github.ref_name }}" "${TARBALLS[@]}" --title "${{ github.ref_name }}" --generate-notes
