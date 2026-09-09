@@ -1,0 +1,82 @@
+{
+  "serverName": "REPLACE_ME",
+  "dryRun": true,
+  "pollIntervalSeconds": 15,
+  "notificationLevel": "ProblemsOnly",
+  "dockerSocketPath": "/var/run/docker.sock",
+  "statePath": "/var/lib/healer/state.json",
+
+  "telegram": {
+    "botTokenEnvVar": "TELEGRAM_BOT_TOKEN",
+    "chatIdEnvVar": "TELEGRAM_CHAT_ID"
+  },
+
+  "thresholds": {
+    "hostMemoryWarningPercent": 80,
+    "hostMemoryCriticalPercent": 90,
+    "hostSwapCriticalPercent": 90,
+    "diskWarningPercent": 80,
+    "diskCriticalPercent": 90,
+    "diskMountsToCheck": ["/", "/var/lib/docker"],
+    "loadAvg1CriticalMultiplierOfCores": 4.0,
+    "containerMemoryWarningPercentOfLimit": 85,
+    "containerMemoryCriticalPercentOfLimit": 95,
+    "containerMemoryWarningPercentOfHostWhenNoLimit": 15,
+    "containerMemoryCriticalPercentOfHostWhenNoLimit": 25,
+    "unhealthyGraceSeconds": 60,
+    "sustainedBreachTicksRequired": 2
+  },
+
+  "restartPolicy": {
+    "backoffStagesSeconds": [30, 60, 120, 300, 900],
+    "circuitBreakerFailureThreshold": 5,
+    "circuitBreakerWindowMinutes": 30,
+    "circuitBreakerCooldownMinutes": 60,
+    "globalActionCooldownSeconds": 90,
+    "maxConcurrentActionsPerTick": 1,
+    "restartVerificationGraceSeconds": 60
+  },
+
+  "hostPressureRelief": {
+    "enablePruneStoppedContainers": true,
+    "enablePruneDanglingImages": true,
+    "pruneImageRetentionHours": 24,
+    "enableSwapfile": false,
+    "swapfilePath": "/swapfile",
+    "swapfileSizeMb": 2048,
+    "enableDropCaches": false
+  },
+
+  "scheduledReboots": {
+    "host": {
+      "enabled": false,
+      "intervalDays": 7,
+      "anchorDate": "2026-01-04",
+      "hour": 3,
+      "minute": 0,
+      "timeZoneId": "UTC"
+    },
+    "containers": []
+  },
+
+  "scheduledComposeRestarts": {
+    "projects": []
+  },
+
+  "containerOverrides": [],
+
+  "history": {
+    "historyDbPath": "/var/lib/healer/history.db",
+    "snapshotIntervalSeconds": 60,
+    "resourceSnapshotRetentionDays": 15,
+    "actionHistoryRetentionDays": 90,
+    "retentionSweepHour": 3
+  },
+
+  "logging": {
+    "logDirectory": "/var/log/healer",
+    "fileSizeLimitMb": 10,
+    "retainedFileCount": 7,
+    "minimumLevel": "Information"
+  }
+}

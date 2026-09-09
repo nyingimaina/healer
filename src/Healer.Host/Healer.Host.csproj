@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Deterministic>true</Deterministic>
+    <RootNamespace>Healer.Host</RootNamespace>
+    <AssemblyName>healer</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Native AOT: single self-contained binary, no runtime dependency on the target box.
+         RID is supplied at publish time (linux-x64 / linux-arm64) — see docs/RUNBOOK.md.
+         AOT must be published FROM native Linux; Windows cannot reliably cross-compile it. -->
+    <PublishAot>true</PublishAot>
+    <SelfContained>true</SelfContained>
+    <TrimMode>full</TrimMode>
+    <StripSymbols>true</StripSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.31" />
+    <!-- Serilog: reflection-light enough to be a reasonable AOT bet for the plain scalar-property
+         logging used here (no object destructuring) — still an explicit item to verify with no
+         trim warnings during the AOT publish spike, alongside Microsoft.Data.Sqlite's own flag. -->
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Healer.Core\Healer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

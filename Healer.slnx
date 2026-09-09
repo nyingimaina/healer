@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Healer.Core/Healer.Core.csproj" />
+    <Project Path="src/Healer.Host/Healer.Host.csproj" />
+    <Project Path="src/Healer.Setup/Healer.Setup.csproj" />
+    <Project Path="src/Healer.Status/Healer.Status.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="src/Healer.Tests/Healer.Tests.csproj" />
+    <Project Path="src/Healer.Host.Tests/Healer.Host.Tests.csproj" />
+    <Project Path="src/Healer.Setup.Tests/Healer.Setup.Tests.csproj" />
+    <Project Path="src/Healer.Status.Tests/Healer.Status.Tests.csproj" />
+  </Folder>
+</Solution>

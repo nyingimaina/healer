@@ -1,0 +1,58 @@
+[Unit]
+Description=Healer - host and container resource guardian
+After=network-online.target docker.service
+Wants=network-online.target
+# Intentionally NOT "Requires=docker.service" — Healer must still start, read host metrics, and
+# alert even if dockerd itself is down or crash-looping.
+
+# Disables systemd's restart-rate limit entirely. Without this, a genuine crash-loop (e.g. caused
+# by a bad config edit) would eventually make systemd GIVE UP restarting Healer after too many
+# attempts in too short a window — exactly the opposite of "always running". RestartSec below still
+# keeps a crash-loop from spinning the CPU.
+StartLimitIntervalSec=0
+
+[Service]
+# Type=notify + the watchdog below let systemd tell the difference between "crashed" (Restart=always
+# alone already handles this) and "hung but still technically running" (Restart=always alone does
+# NOT catch this — the process never exits, it just stops responding). Healer.Host calls sd_notify
+# READY=1 once at startup and WATCHDOG=1 every poll tick (see HostActions/SystemdNotifier.cs).
+Type=notify
+NotifyAccess=main
+WatchdogSec=90
+
+ExecStart=/opt/healer/healer
+WorkingDirectory=/opt/healer
+# Native AOT executables do NOT get the automatic "search alongside the executable for native
+# libraries" behavior that ordinary self-contained .NET apps get — that machinery lives in the
+# corehost/apphost layer, which Native AOT bypasses entirely by design. Microsoft.Data.Sqlite's
+# native e_sqlite3 library ships as its own file next to `healer` (see deploy/build-deb.sh), but
+# without this, the OS's dynamic linker never looks in /opt/healer for it at all. Confirmed by
+# running the actual package: every history-recording tick failed with
+# "DllNotFoundException: Unable to load shared library 'e_sqlite3'" until this was added.
+Environment=LD_LIBRARY_PATH=/opt/healer
+Restart=always
+RestartSec=5
+User=root
+# Root (or `docker` group membership, which is root-equivalent) is required to read
+# /var/run/docker.sock and to perform host actions (swapfile, drop_caches, systemctl reboot).
+
+# Explicit self-limit so a bug in Healer can't itself contribute to the exact problem it exists to
+# prevent.
+MemoryMax=128M
+MemoryHigh=96M
+CPUQuota=50%
+TasksMax=64
+
+# Healer's whole purpose is to keep OTHER processes from being picked by the kernel OOM-killer —
+# it would be a bad joke if Healer itself were an easy target. This makes the kernel treat Healer
+# as one of the very last processes to ever consider killing under memory pressure.
+OOMScoreAdjust=-900
+
+Environment=HEALER_CONFIG_PATH=/etc/healer/healer.json
+EnvironmentFile=-/etc/healer/healer.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=healer
+
+[Install]
+WantedBy=multi-user.target

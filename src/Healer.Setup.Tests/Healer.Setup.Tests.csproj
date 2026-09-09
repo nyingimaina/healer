@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- References the .cs files directly rather than the Healer.Setup project: Healer.Setup is an
+         OutputType=Exe with a top-level-statements Program.cs, and its Logic/ classes are the only
+         part worth unit testing (the TUI wiring itself is not, consistent with the rest of the
+         project's testing approach) — compiling just Logic/ avoids pulling in Terminal.Gui/Program.cs. -->
+    <Compile Include="..\Healer.Setup\Logic\*.cs" />
+    <ProjectReference Include="..\Healer.Core\Healer.Core.csproj" />
+    <ProjectReference Include="..\Healer.Host\Healer.Host.csproj" />
+  </ItemGroup>
+
+</Project>

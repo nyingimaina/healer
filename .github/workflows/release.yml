@@ -1,0 +1,94 @@
+name: Release
+
+# Builds Healer's Linux binaries and publishes them as a GitHub Release whenever you push a version
+# tag (e.g. `v1.0.0`). This exists specifically because Native AOT for linux-x64/linux-arm64 must be
+# built ON Linux — a Windows dev machine cannot cross-compile it — so this workflow does that part
+# on GitHub-hosted Linux runners instead. See docs/DEPLOY-FROM-WINDOWS.md for the full walkthrough.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners for each architecture — no cross-compilation, which is the more fragile
+          # path for Native AOT. If your plan/account doesn't have arm64 runners available, just
+          # delete the linux-arm64 entry below; bootstrap.sh only complains if a box's architecture
+          # has no matching download, so shipping x64-only is a safe, valid choice too.
+          - rid: linux-x64
+            runner: ubuntu-latest
+          - rid: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Publish Healer.Host (Native AOT)
+        run: >
+          dotnet publish src/Healer.Host -c Release -r ${{ matrix.rid }}
+          --self-contained true -p:PublishAot=true -o publish/host
+
+      - name: Publish Healer.Setup
+        run: >
+          dotnet publish src/Healer.Setup -c Release -r ${{ matrix.rid }}
+          --self-contained true -o publish/setup
+
+      - name: Publish Healer.Status
+        run: >
+          dotnet publish src/Healer.Status -c Release -r ${{ matrix.rid }}
+          --self-contained true -o publish/status
+
+      - name: Package release tarball
+        run: |
+          set -e
+          STAGE="$(mktemp -d)"
+          cp publish/host/healer "$STAGE/"
+          cp publish/setup/healer-setup "$STAGE/"
+          cp publish/status/healer-status "$STAGE/"
+          cp deploy/healer.service "$STAGE/"
+          cp deploy/healer-first-run.sh "$STAGE/"
+          chmod +x "$STAGE/healer" "$STAGE/healer-setup" "$STAGE/healer-status" "$STAGE/healer-first-run.sh"
+          mkdir -p dist
+          tar -czf "dist/healer-${{ matrix.rid }}.tar.gz" -C "$STAGE" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: healer-${{ matrix.rid }}
+          path: dist/healer-${{ matrix.rid }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Run the test suite one more time before publishing
+        run: dotnet test Healer.slnx
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/*.tar.gz --title "${{ github.ref_name }}" --generate-notes

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net10.0, not net8.0 like Healer.Core/Host: Terminal.Gui 2.4.17 (the current GA release)
+         targets net10.0 only. This is a standalone one-shot tool, not the always-on AOT daemon, so
+         it isn't bound to the daemon's LTS target — referencing net8.0 Healer.Core from here is fine. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Deterministic>true</Deterministic>
+    <RootNamespace>Healer.Setup</RootNamespace>
+    <AssemblyName>healer-setup</AssemblyName>
+    <!-- One-shot interactive tool, not the always-on daemon: self-contained so no separate .NET
+         install is needed on the box, but deliberately NOT trimmed/AOT — Terminal.Gui's reflection
+         use is fine here since this isn't under the daemon's tight footprint/AOT constraints. -->
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Terminal.Gui" Version="2.4.17" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Healer.Core\Healer.Core.csproj" />
+    <!-- Reuses Healer.Host's existing hand-rolled Docker Unix-socket client (DockerApiClient) for
+         compose-project auto-discovery (see Logic/ComposeProjectDiscovery.cs), rather than
+         duplicating that socket-transport code here. A net10.0 app referencing a net8.0 library is
+         an ordinary, fully-supported forward reference — this doesn't change how either project is
+         published (Healer.Host's AOT/trim flags are set on ITS OWN publish command, not inherited
+         by consumers), so it doesn't put Healer.Setup under any AOT/trim constraint. -->
+    <ProjectReference Include="..\Healer.Host\Healer.Host.csproj" />
+  </ItemGroup>
+
+</Project>

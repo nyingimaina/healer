@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same approach as Healer.Setup.Tests: compile Logic/ directly rather than referencing the
+         Healer.Status project itself, so this test project needs neither Terminal.Gui nor
+         Healer.Host (which Healer.Status references only for its TUI wiring, not its testable logic). -->
+    <Compile Include="..\Healer.Status\Logic\*.cs" />
+    <ProjectReference Include="..\Healer.Core\Healer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

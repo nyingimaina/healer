@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net10.0 to match Terminal.Gui 2.4.17 (the current GA release), same rationale as Healer.Setup. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Deterministic>true</Deterministic>
+    <RootNamespace>Healer.Status</RootNamespace>
+    <AssemblyName>healer-status</AssemblyName>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Terminal.Gui" Version="2.4.17" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Healer.Core\Healer.Core.csproj" />
+    <!-- Reuses Healer.Host's SqliteHistoryStore/DockerSocketHttpClient/HostMetricsProvider read
+         paths rather than re-implementing them — Status reads the exact same DB and live sources
+         the daemon does, so consistency matters more here than the Core/Host isolation that made
+         sense for Healer.Setup (which only needed one small, independent Telegram POST). -->
+    <ProjectReference Include="..\Healer.Host\Healer.Host.csproj" />
+  </ItemGroup>
+
+</Project>
