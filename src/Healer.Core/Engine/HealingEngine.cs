@@ -57,6 +57,7 @@ public sealed class HealingEngine
         var containers = await _containerRuntime.ListContainersAsync(ct);
 
         await VerifyPendingRestartsAsync(state, containers, now, ct);
+        await MaybeVerifyPendingRebootAsync(host, state, now, ct);
 
         var previousRestartCounts = state.Containers
             .Where(kv => kv.Value.LastObservedRestartCount is not null)
@@ -205,7 +206,12 @@ public sealed class HealingEngine
         if (action.Type == ActionType.ScheduledHostReboot)
         {
             // Persist state and notify BEFORE rebooting — the process does not survive to report afterward.
+            // PendingRebootRequestedUtc/Reason let a LATER tick (after the daemon restarts) confirm via
+            // RebootVerifier whether the reboot actually happened, rather than just optimistically
+            // trusting the Success outcome recorded below.
             state.LastScheduledHostRebootUtc = now;
+            state.PendingRebootRequestedUtc = now;
+            state.PendingRebootReason = "scheduled reboot window";
             state.LastGlobalActionUtc = now;
             await _stateStore.SaveAsync(state, ct);
 
@@ -322,6 +328,31 @@ public sealed class HealingEngine
         }
     }
 
+    private async Task MaybeVerifyPendingRebootAsync(HostMetrics host, HealerState state, DateTimeOffset now, CancellationToken ct)
+    {
+        var verification = RebootVerifier.Evaluate(state.PendingRebootRequestedUtc, host.BootTimeUtc, now);
+        if (verification is RebootVerificationOutcome.NothingPending or RebootVerificationOutcome.StillWaiting)
+        {
+            return;
+        }
+
+        var action = new PlannedAction { Type = ActionType.HostRebootVerification, Target = "host", Reason = state.PendingRebootReason ?? "unknown" };
+        var outcome = verification == RebootVerificationOutcome.Verified
+            ? new ActionOutcome { Action = action, Status = ActionOutcomeStatus.Success, TimestampUtc = now }
+            : new ActionOutcome
+            {
+                Action = action,
+                Status = ActionOutcomeStatus.Failed,
+                TimestampUtc = now,
+                Detail = "host boot time never advanced past the request within the grace window — the host may not have rebooted, or Healer didn't come back",
+            };
+
+        await NotifyAndRecordAsync(outcome, ct);
+
+        state.PendingRebootRequestedUtc = null;
+        state.PendingRebootReason = null;
+    }
+
     private async Task MaybeRecordSnapshotAsync(HostMetrics host, IReadOnlyList<ContainerInfo> containers, HealerState state, DateTimeOffset now, CancellationToken ct)
     {
         if (state.LastHistorySnapshotUtc is { } last && now - last < TimeSpan.FromSeconds(_config.History.SnapshotIntervalSeconds))
@@ -396,7 +427,7 @@ public sealed class HealingEngine
             ActionOutcomeStatus.Failed => true,
             ActionOutcomeStatus.SkippedCircuitOpen => true,
             ActionOutcomeStatus.DryRun => true,
-            ActionOutcomeStatus.Success => outcome.Action.Type is ActionType.ScheduledHostReboot or ActionType.ScheduledContainerReboot or ActionType.ScheduledComposeRestart,
+            ActionOutcomeStatus.Success => outcome.Action.Type is ActionType.ScheduledHostReboot or ActionType.ScheduledContainerReboot or ActionType.ScheduledComposeRestart or ActionType.HostRebootVerification,
             _ => false,
         };
     }

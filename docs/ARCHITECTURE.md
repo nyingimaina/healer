@@ -102,6 +102,47 @@ that hangs while technically still running. `deploy/healer.service` closes both 
 **not** protect against total EC2 instance termination, which needs an EC2-level mechanism (Auto
 Recovery, an Auto Scaling Group) outside a host-level daemon's reach.
 
+### Confirming a reboot actually worked, not just assuming it did
+
+`ExecuteChosenActionAsync`'s `ScheduledHostReboot` branch has always had an honesty gap: it records a
+`Success` outcome and sends the Telegram notice *before* calling `RebootHostAsync`, simply because
+the process doesn't survive to report anything afterward. That's a reasonable guess, not a real
+confirmation — the box might not come back up cleanly, or `healer` might fail to restart even if the
+box does.
+
+**`Healer.Core.Decision.RebootVerifier`** closes this, for both the production scheduled-reboot path
+and the setup wizard's "Test Reboot Now" button (see below): whatever triggers a reboot sets
+`HealerState.PendingRebootRequestedUtc`/`PendingRebootReason` right before rebooting; every tick
+afterward, `HealingEngine.MaybeVerifyPendingRebootAsync` compares that timestamp against
+`HostMetrics.BootTimeUtc` (read from `/proc/uptime` — the only reliable signal that the *host*
+actually rebooted, as opposed to just the `healer` service restarting). Three outcomes: boot time is
+now after the request → **Verified**, record + notify `Success` and clear the marker; the 30-minute
+grace window elapsed with boot time never advancing → **TimedOut**, record + notify `Failed` and
+clear the marker (Healer came back up, but the host apparently never rebooted — or this is a later,
+unrelated daemon start that found a stale marker); still within the window with boot time unchanged →
+say nothing yet, don't spam every 15-second tick. Recorded as a new `ActionType.HostRebootVerification`
+— deliberately not reusing `ScheduledHostReboot`, since "we decided to reboot" and "we confirmed a
+reboot actually completed" are different events that would otherwise look identical in
+`healer-status`'s history browser.
+
+**The wizard's "Test Reboot Now"** (`Healer.Setup.Logic.RebootTestRunner`, on the Success step, after
+Apply) reuses this exact mechanism rather than inventing its own — the wizard process can't report
+success itself for the same reason `ExecuteChosenActionAsync` never could, so it just requests a
+reboot the same way the production path does and lets the daemon's own verification report back via
+Telegram once it's actually back up. A genuine race had to be closed here: by the time this button is
+reachable, `healer` is already running (Apply already did `enable --now`), so writing the pending-
+reboot marker straight into the state file risks the live daemon's own next periodic `SaveAsync` —
+using its in-memory copy, which knows nothing of the edit — silently clobbering it moments later.
+`RebootTestRunner` avoids this by stopping the service, editing the state file while nothing else can
+touch it, and restarting the service (so it loads the fresh marker into memory) *before* triggering
+the actual reboot — starting a service doesn't itself advance the host's boot time, so this can't
+produce a false-positive "verified" the instant it restarts.
+
+**Explicit limitation, not glossed over**: if the box never comes back from a reboot test at all,
+nothing running on it can report that — the only signal is the *absence* of the expected Telegram
+message, not a positive failure report. `TimedOut` only fires for the narrower case where Healer
+itself does start back up but boot time never advanced.
+
 ## History storage and retention
 
 `Healer.Host.History.SqliteHistoryStore` uses plain parameterized ADO.NET via `Microsoft.Data.Sqlite`
@@ -341,6 +382,15 @@ configured by hand-editing `/etc/healer/healer.json` afterward (see `docs/README
 reference) — a step to auto-populate that from the discovered service list wasn't built, since
 excluding a specific service is a less common, more advanced choice than "which projects to refresh
 at all," which the wizard now handles with zero typing in the common case.
+
+**"Test Compose Restart Now"** on this same step calls the real, already-tested
+`DockerComposeRestartExecutor.RestartProjectAsync` directly against whatever's currently
+selected/valid, showing pass/fail inline immediately — unlike the reboot test (see above), the
+wizard process survives a compose restart, so there's no need for the pending-marker/verification
+machinery; it's the same immediate-feedback shape as the Telegram step's "Send Test Message".
+Deliberately not written to `healer-status`'s history — the SQLite DB doesn't exist yet at this
+point in the wizard (pre-Apply), and the wizard already reports the result inline on the same
+screen, immediately.
 
 ## Logging
 

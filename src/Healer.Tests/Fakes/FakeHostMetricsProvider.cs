@@ -15,6 +15,7 @@ public sealed class FakeHostMetricsProvider : IHostMetricsProvider
         LoadAvg15 = 0.1,
         CpuCoreCount = 2,
         DiskUsedPercentByMount = new Dictionary<string, double> { ["/"] = 10 },
+        BootTimeUtc = DateTimeOffset.UtcNow.AddDays(-1),
     };
 
     public Task<HostMetrics> GetHostMetricsAsync(CancellationToken ct) => Task.FromResult(Metrics);

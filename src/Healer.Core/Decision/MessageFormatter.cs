@@ -41,6 +41,7 @@ public static class MessageFormatter
     private static string DescribeAction(PlannedAction action) => action.Type switch
     {
         ActionType.ScheduledHostReboot => "reboot the host",
+        ActionType.HostRebootVerification => "confirm the host reboot completed",
         ActionType.ScheduledContainerReboot => $"restart {action.Target} (scheduled)",
         ActionType.ScheduledComposeRestart => $"restart all containers in compose project '{action.Target}' (scheduled refresh)",
         ActionType.CrashLoopRestart => $"restart {action.Target} (crash loop)",

@@ -42,6 +42,15 @@ public sealed class HealerState
 
     public DateTimeOffset? LastScheduledHostRebootUtc { get; set; }
 
+    /// <summary>Set right before a host reboot is actually triggered (scheduled, or a wizard "test
+    /// reboot now"); checked every tick by <see cref="Decision.RebootVerifier"/> once the daemon
+    /// restarts, since a reboot's own process never survives to report success itself. Cleared once
+    /// resolved (verified or timed out), whichever comes first.</summary>
+    public DateTimeOffset? PendingRebootRequestedUtc { get; set; }
+
+    /// <summary>Free-text reason paired with <see cref="PendingRebootRequestedUtc"/>, e.g. "scheduled" or "wizard test" — surfaced in the verification's history/Telegram wording.</summary>
+    public string? PendingRebootReason { get; set; }
+
     /// <summary>Last scheduled compose-restart run per project, keyed by <see cref="Configuration.ComposeProjectSchedule.ProjectName"/>.</summary>
     public Dictionary<string, DateTimeOffset> LastScheduledComposeRestartUtc { get; set; } = [];
 

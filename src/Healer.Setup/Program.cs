@@ -4,7 +4,9 @@
 
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using Healer.Core.Abstractions;
 using Healer.Core.Configuration;
+using Healer.Host.Docker;
 using Healer.Setup.Logic;
 using Terminal.Gui.App;
 using Terminal.Gui.Views;
@@ -17,6 +19,10 @@ var deployDir = AppContext.BaseDirectory;
 // `answers` right before that step is left (see OnMovingNext) — ListView has no mark-changed event
 // to hook live in this Terminal.Gui version.
 Action? composeRecompute = null;
+
+// Set by ApplyAsync once Apply has actually run — lets the Success step's "Test Reboot Now" button
+// find the real StatePath without re-deriving/re-reading the just-written config file.
+HealerConfig? appliedConfig = null;
 
 // Unattended path: a box nobody ever interactively logs into (EC2 User Data, a golden AMI bake)
 // can still configure and start itself at boot, as long as the operator supplied Telegram
@@ -367,6 +373,42 @@ WizardStep BuildComposeRestartStep()
     var tz = TimeZoneInfo.Local;
     step.Add(new Label { X = 0, Y = 32, Text = $"Using this box's local timezone: {tz.Id} (currently {TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz):t})" });
 
+    var composeTestStatus = new Label { X = 0, Y = 35, Width = Dim.Fill(), Height = 2, Text = "" };
+    var composeTestButton = new Button { X = 0, Y = 34, Text = "Test Compose Restart Now" };
+    composeTestButton.Accepting += async (_, _) =>
+    {
+        composeRecompute?.Invoke(); // reflect the checklist's current marks, not just the last recorded state
+
+        var projectsToTest = WizardConfigBuilder.ResolveComposeProjects(answers);
+        if (projectsToTest.Count == 0)
+        {
+            composeTestStatus.Text = "❌ Check at least one project above, or fill in a valid manual directory, first.";
+            return;
+        }
+
+        var names = string.Join(", ", projectsToTest.Select(p => p.Name));
+        composeTestStatus.Text = $"Testing... (this will briefly restart: {names})";
+
+        var executor = new DockerComposeRestartExecutor();
+        var failures = new List<string>();
+        foreach (var project in projectsToTest)
+        {
+            try
+            {
+                await executor.RestartProjectAsync(new ComposeProjectRef(project.Name, project.WorkingDirectory), [], CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{project.Name}: {ex.Message}");
+            }
+        }
+
+        composeTestStatus.Text = failures.Count == 0
+            ? $"✅ Restarted successfully: {names}"
+            : $"❌ Failed: {string.Join("; ", failures)}";
+    };
+    step.Add(composeTestButton, composeTestStatus);
+
     void Recompute()
     {
         if (discoveredProjects.Count > 0)
@@ -510,6 +552,7 @@ async Task ApplyAsync(Label status)
 {
     status.Text = "Writing configuration...";
     var config = WizardConfigBuilder.Build(answers);
+    appliedConfig = config;
     await HealerInstaller.WriteConfigAsync(config, HealerInstaller.DefaultConfigPath, CancellationToken.None);
     await HealerInstaller.WriteEnvFileAsync(config.Telegram, answers.BotToken, answers.ChatId, HealerInstaller.DefaultEnvPath, CancellationToken.None);
 
@@ -527,10 +570,54 @@ WizardStep BuildSuccessStep()
     var step = new WizardStep { Title = "Done" };
     step.Add(new Label
     {
-        X = 0, Y = 0, Width = Dim.Fill(),
+        X = 0, Y = 0, Width = Dim.Fill(), Height = 3,
         Text = "Healer is set up. You'll get a Telegram message confirming it's running.\n\n" +
                "Run `healer-status` any time to see current health and history.",
     });
+
+    step.Add(new Label
+    {
+        X = 0, Y = 4, Width = Dim.Fill(), Height = 2,
+        Text = "Want to confirm this box actually survives a reboot with Healer coming back up on\n" +
+               "its own? You can test that right now, whether or not you scheduled automatic reboots.",
+    });
+
+    var rebootTestStatus = new Label { X = 0, Y = 7, Width = Dim.Fill(), Text = "" };
+    var rebootTestButton = new Button { X = 0, Y = 6, Text = "Test Reboot Now" };
+    rebootTestButton.Accepting += async (_, _) =>
+    {
+        // Last button is the dialog's default (Enter-triggered) one — "Cancel" listed last so an
+        // accidental Enter press can never trigger an actual reboot.
+        var choice = MessageBox.Query(
+            Application.Instance,
+            "Reboot this server now?",
+            "This restarts the server right now. You will be disconnected — reconnect via SSH in a\n" +
+            "minute or two. Healer will send you a Telegram message once it's confirmed the reboot\n" +
+            "actually completed (this can take a little longer than the SSH reconnect itself).",
+            "Reboot Now", "Cancel");
+
+        if (choice != 0)
+        {
+            return;
+        }
+
+        if (appliedConfig is null)
+        {
+            rebootTestStatus.Text = "❌ Nothing was applied yet — this shouldn't be reachable before Apply.";
+            return;
+        }
+
+        rebootTestStatus.Text = "Preparing for reboot test...";
+        var (started, error) = await RebootTestRunner.TriggerAsync(appliedConfig.StatePath, CancellationToken.None);
+        if (!started)
+        {
+            rebootTestStatus.Text = $"❌ {error}";
+        }
+        // If it did start, the box is rebooting right about now — there's no later point at which
+        // this label could usefully update; the Telegram message is the real confirmation.
+    };
+    step.Add(rebootTestButton, rebootTestStatus);
+
     return step;
 }
 

@@ -61,10 +61,16 @@ The wizard asks for:
   check-off list; nothing to type or look up. Check the ones to periodically restart (all their
   containers together, via `docker compose restart`, on the same interval/hour presets as scheduled
   reboots). If nothing is running yet, it falls back to a manual directory entry, validated against
-  the actual filesystem before you can continue.
+  the actual filesystem before you can continue. A **"Test Compose Restart Now"** button on this
+  same screen restarts whatever's currently selected right away and shows pass/fail immediately —
+  no need to wait for the schedule to prove it works.
 
 At the end it writes `/etc/healer/healer.json` + `/etc/healer/healer.env`, installs the systemd
-unit, and starts the service — then confirms on Telegram that it's running.
+unit, and starts the service — then confirms on Telegram that it's running. On the final screen, a
+**"Test Reboot Now"** button (behind a confirmation, since this is a real reboot) lets you confirm
+this box actually comes back up with Healer running afterward, whether or not you scheduled
+automatic reboots — since a reboot kills the wizard itself, the confirmation arrives on Telegram a
+short while after you reconnect, not in the wizard.
 
 ## Re-running the wizard
 

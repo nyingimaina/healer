@@ -25,7 +25,17 @@ public sealed class HostMetricsProvider(IReadOnlyList<string> diskMountsToCheck)
             LoadAvg15 = load15,
             CpuCoreCount = Environment.ProcessorCount,
             DiskUsedPercentByMount = diskUsage,
+            BootTimeUtc = ReadBootTimeUtc(),
         });
+    }
+
+    /// <summary>The only reliable way to tell a genuine host reboot happened, as opposed to just the
+    /// `healer` service restarting — see <see cref="Healer.Core.Decision.RebootVerifier"/>.</summary>
+    private static DateTimeOffset ReadBootTimeUtc()
+    {
+        var fields = File.ReadAllText("/proc/uptime").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var uptimeSeconds = fields.Length > 0 && double.TryParse(fields[0], out var seconds) ? seconds : 0.0;
+        return DateTimeOffset.UtcNow - TimeSpan.FromSeconds(uptimeSeconds);
     }
 
     private static (double MemUsedPercent, long TotalMemoryBytes, double SwapUsedPercent) ReadMemInfo()

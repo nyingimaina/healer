@@ -58,6 +58,7 @@ public class ActionHistoryFormatterTests
             LoadAvg15 = 0.8,
             CpuCoreCount = 4,
             DiskUsedPercentByMount = new Dictionary<string, double>(),
+            BootTimeUtc = DateTimeOffset.UtcNow,
         };
 
         var summary = ActionHistoryFormatter.FormatLiveSummary(host, containerCount: 5, unhealthyCount: 1);

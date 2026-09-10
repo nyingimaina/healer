@@ -21,6 +21,7 @@ public class ThresholdEvaluatorTests
         LoadAvg15 = load1,
         CpuCoreCount = cores,
         DiskUsedPercentByMount = disk ?? new Dictionary<string, double> { ["/"] = 10 },
+        BootTimeUtc = DateTimeOffset.UtcNow.AddDays(-1),
     };
 
     private static ContainerInfo MakeContainer(

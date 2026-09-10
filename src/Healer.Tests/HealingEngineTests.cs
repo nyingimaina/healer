@@ -1,4 +1,5 @@
 using Healer.Core.Configuration;
+using Healer.Core.Decision;
 using Healer.Core.Engine;
 using Healer.Core.Models;
 using Healer.Tests.Fakes;
@@ -158,6 +159,57 @@ public class HealingEngineTests
         Assert.Equal(1, h.HostSystemActions.RebootHostCalls);
         Assert.True(saveCallsAtRebootTime is >= 1, "state must be saved before the reboot call");
         Assert.True(notifyCountAtRebootTime is >= 1, "Telegram must be notified before the reboot call");
+        Assert.Equal(T0, h.StateStore.State.PendingRebootRequestedUtc);
+        Assert.Equal("scheduled reboot window", h.StateStore.State.PendingRebootReason);
+    }
+
+    [Fact]
+    public async Task Live_PendingRebootVerified_WhenBootTimeAdvancesPastTheRequest_RecordsSuccessAndClearsTheMarker()
+    {
+        var h = new Harness { Config = new HealerConfig { ServerName = "test-server", DryRun = false } };
+        h.StateStore.State.PendingRebootRequestedUtc = T0;
+        h.StateStore.State.PendingRebootReason = "wizard test";
+        h.HostMetrics.Metrics = h.HostMetrics.Metrics with { BootTimeUtc = T0.AddMinutes(2) };
+        h.TimeProvider.Advance(TimeSpan.FromMinutes(3));
+
+        await h.Tick();
+
+        Assert.Contains(h.HistoryStore.ActionRecords, a =>
+            a.Action.Type == ActionType.HostRebootVerification && a.Status == ActionOutcomeStatus.Success && a.Action.Reason == "wizard test");
+        Assert.Contains(h.Notifier.SentMessages, m => m.Contains("confirm the host reboot completed"));
+        Assert.Null(h.StateStore.State.PendingRebootRequestedUtc);
+        Assert.Null(h.StateStore.State.PendingRebootReason);
+    }
+
+    [Fact]
+    public async Task Live_PendingRebootTimesOut_WhenGraceWindowElapsesWithoutBootTimeAdvancing_RecordsFailureAndClearsTheMarker()
+    {
+        var h = new Harness { Config = new HealerConfig { ServerName = "test-server", DryRun = false } };
+        h.StateStore.State.PendingRebootRequestedUtc = T0;
+        h.StateStore.State.PendingRebootReason = "scheduled reboot window";
+        h.HostMetrics.Metrics = h.HostMetrics.Metrics with { BootTimeUtc = T0.AddMinutes(-10) }; // never advanced
+        h.TimeProvider.Advance(RebootVerifier.DefaultGraceWindow + TimeSpan.FromMinutes(1));
+
+        await h.Tick();
+
+        Assert.Contains(h.HistoryStore.ActionRecords, a =>
+            a.Action.Type == ActionType.HostRebootVerification && a.Status == ActionOutcomeStatus.Failed);
+        Assert.Null(h.StateStore.State.PendingRebootRequestedUtc);
+    }
+
+    [Fact]
+    public async Task Live_PendingRebootStillWaiting_WithinGraceWindow_DoesNothingAndKeepsTheMarker()
+    {
+        var h = new Harness { Config = new HealerConfig { ServerName = "test-server", DryRun = false } };
+        h.StateStore.State.PendingRebootRequestedUtc = T0;
+        h.StateStore.State.PendingRebootReason = "scheduled reboot window";
+        h.HostMetrics.Metrics = h.HostMetrics.Metrics with { BootTimeUtc = T0.AddMinutes(-10) };
+        h.TimeProvider.Advance(TimeSpan.FromMinutes(5)); // well within the default 30-minute window
+
+        await h.Tick();
+
+        Assert.DoesNotContain(h.HistoryStore.ActionRecords, a => a.Action.Type == ActionType.HostRebootVerification);
+        Assert.Equal(T0, h.StateStore.State.PendingRebootRequestedUtc);
     }
 
     [Fact]

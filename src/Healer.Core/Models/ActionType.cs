@@ -9,6 +9,11 @@ namespace Healer.Core.Models;
 public enum ActionType
 {
     ScheduledHostReboot,
+
+    /// <summary>Not produced by BuildCandidates/CooldownGate like the others — recorded directly by
+    /// HealingEngine.MaybeVerifyPendingRebootAsync once a pending reboot (scheduled, or a wizard
+    /// "test reboot now") resolves, since a reboot's own process never survives to report itself.</summary>
+    HostRebootVerification,
     ScheduledContainerReboot,
     ScheduledComposeRestart,
     CrashLoopRestart,

@@ -20,4 +20,9 @@ public sealed record HostMetrics
 
     /// <summary>Disk used percent keyed by mount path (e.g. "/", "/var/lib/docker").</summary>
     public required IReadOnlyDictionary<string, double> DiskUsedPercentByMount { get; init; }
+
+    /// <summary>When this host last booted, read from /proc/uptime. The only reliable way to tell
+    /// whether a genuine host reboot happened, as opposed to just the `healer` service restarting —
+    /// see <see cref="Decision.RebootVerifier"/>.</summary>
+    public required DateTimeOffset BootTimeUtc { get; init; }
 }

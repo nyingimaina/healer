@@ -28,8 +28,10 @@ public static class WizardConfigBuilder
         return SafetyProfilePresets.ApplyTo(baseConfig, answers.SafetyProfile);
     }
 
-    /// <summary>Picked-from-a-checklist projects take priority; the single manually-typed project is only used as a fallback when nothing was auto-discovered.</summary>
-    private static IReadOnlyList<DiscoveredComposeProject> ResolveComposeProjects(WizardAnswers answers)
+    /// <summary>Picked-from-a-checklist projects take priority; the single manually-typed project is
+    /// only used as a fallback when nothing was auto-discovered. Public so the wizard's "Test Compose
+    /// Restart Now" button can test exactly whatever Apply would actually configure.</summary>
+    public static IReadOnlyList<DiscoveredComposeProject> ResolveComposeProjects(WizardAnswers answers)
     {
         if (answers.ComposeProjects.Count > 0)
         {
