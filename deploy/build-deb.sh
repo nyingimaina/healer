@@ -9,6 +9,11 @@
 #   VERSION defaults to 1.0.0-1 — there's no git repo (yet) to derive one from automatically. Bump
 #   the Debian revision (the "-N" suffix) for a rebuild of the same source, or the version itself
 #   for an actual functional change.
+#
+# The actual `dotnet publish` + payload assembly (shared with .github/workflows/release.yml) lives
+# in deploy/build-payload.sh — this script only adds what's specific to the .deb format itself:
+# DEBIAN/ control metadata, the postinst/prerm/postrm lifecycle scripts, the /usr/bin symlinks, and
+# relocating healer-first-run.sh to its Debian-conventional /etc/profile.d location.
 
 set -euo pipefail
 
@@ -32,82 +37,26 @@ BUILD_ROOT="$(mktemp -d)"
 trap 'rm -rf "$BUILD_ROOT"' EXIT
 PKGROOT="$BUILD_ROOT/healer_${VERSION}_amd64"
 
-if ! command -v dotnet >/dev/null 2>&1; then
-    echo "dotnet not found on PATH. Install the .NET 8 and .NET 10 SDKs first (see docs/DEPLOY-FROM-WINDOWS.md's WSL section)." >&2
-    exit 1
-fi
 if ! command -v dpkg-deb >/dev/null 2>&1; then
     echo "dpkg-deb not found — this script must run on a Debian-family Linux (Ubuntu, including WSL Ubuntu)." >&2
     exit 1
 fi
 
-echo "== Publishing linux-x64 binaries (version $VERSION) =="
-rm -rf publish
-dotnet publish src/Healer.Host -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o publish/host
-# Healer.Setup/Status are self-contained but NOT AOT (Terminal.Gui's reflection use is fine for a
-# one-shot tool). Without -p:PublishSingleFile, "--self-contained true" still produces ~220 files
-# (the apphost plus every runtime/dependency DLL and native library) — copying only the named
-# executable, as this script does below, would silently ship a binary missing everything it needs
-# to run. PublishSingleFile + IncludeNativeLibrariesForSelfExtract bundles it all into one real
-# executable (confirmed by inspecting `dpkg-deb --contents` during development — the bug was caught
-# before ever reaching a real box, not by luck).
-dotnet publish src/Healer.Setup -c Release -r linux-x64 --self-contained true \
-    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/setup
-dotnet publish src/Healer.Status -c Release -r linux-x64 --self-contained true \
-    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/status
-
 echo "== Assembling package tree at $PKGROOT =="
 rm -rf "$PKGROOT"
-mkdir -p "$PKGROOT/DEBIAN" "$PKGROOT/opt/healer" "$PKGROOT/opt/healer/.extract" "$PKGROOT/etc/profile.d" "$PKGROOT/usr/bin"
+mkdir -p "$PKGROOT/DEBIAN" "$PKGROOT/opt/healer" "$PKGROOT/etc/profile.d" "$PKGROOT/usr/bin"
 chmod 755 "$PKGROOT/DEBIAN" # dpkg-deb requires exactly 0755-0775; belt-and-braces given the note above.
-# 1777 (world-writable + sticky bit, same as /tmp) because healer-setup/healer-status run as many
-# different users across their various call sites (root during postinst, root or a human via
-# `sudo`, whatever `healer-first-run.sh` runs as) — this directory must be writable by all of them.
-chmod 1777 "$PKGROOT/opt/healer/.extract"
 
-cp publish/host/healer "$PKGROOT/opt/healer/healer"
-# Native AOT only compiles MANAGED code to native — a genuinely native dependency like SQLite's C
-# library does NOT get folded into the single `healer` executable, and still ships as its own .so
-# file next to it (confirmed by inspecting `publish/host/` during development: dotnet publish
-# produces it there unprompted). Missing this file is exactly what caused "sqlite error 14: unable
-# to open database file" at runtime — the daemon started fine (the AOT executable itself is
-# complete), but SQLite's native provider had nothing to dlopen the moment it was actually used.
-cp publish/host/libe_sqlite3.so "$PKGROOT/opt/healer/libe_sqlite3.so"
-chmod 755 "$PKGROOT/opt/healer/libe_sqlite3.so"
+chmod +x "$SCRIPT_DIR/build-payload.sh"
+"$SCRIPT_DIR/build-payload.sh" linux-x64 "$PKGROOT/opt/healer"
 
-# healer-setup/healer-status are PublishSingleFile + IncludeNativeLibrariesForSelfExtract bundles
-# (see above) — at every run, they need to extract their native libraries to a writable directory,
-# and confirmed BY ACTUALLY RUNNING THE PACKAGE during development: .NET's automatic fallback
-# search for that directory (HOME, TMPDIR, etc.) is not reliable across the different contexts
-# these tools run in — it failed with "a read-write cache directory couldn't be created" when
-# invoked in this project's real deployment paths. The fix is to pin an explicit, always-writable
-# extraction directory rather than depend on that guesswork: rename the real executables to
-# `.bin`, and ship a thin wrapper script under the original name that sets
-# DOTNET_BUNDLE_EXTRACT_BASE_DIR before exec-ing it. Every existing call site (postinst,
-# healer-first-run.sh, and the /usr/bin symlinks) invokes healer-setup/healer-status by their
-# original name, so this fix applies everywhere with no changes needed anywhere else.
-cp publish/setup/healer-setup "$PKGROOT/opt/healer/healer-setup.bin"
-cp publish/status/healer-status "$PKGROOT/opt/healer/healer-status.bin"
-chmod 755 "$PKGROOT/opt/healer/healer-setup.bin" "$PKGROOT/opt/healer/healer-status.bin"
-
-for name in healer-setup healer-status; do
-    cat >"$PKGROOT/opt/healer/$name" <<EOF
-#!/bin/sh
-export DOTNET_BUNDLE_EXTRACT_BASE_DIR="/opt/healer/.extract"
-exec "/opt/healer/$name.bin" "\$@"
-EOF
-done
-# healer.service is shipped INSIDE /opt/healer, not at the Debian-canonical
-# /lib/systemd/system/healer.service. This is deliberate: Healer.Setup.Logic.HealerInstaller
-# already expects the unit file sitting next to the healer-setup binary and owns the entire
-# systemd lifecycle itself (copy to /etc/systemd/system, daemon-reload, enable --now). Putting it
-# here means zero application code changes were needed for this package — see docs/ARCHITECTURE.md.
-cp deploy/healer.service "$PKGROOT/opt/healer/healer.service"
-cp deploy/healer-first-run.sh "$PKGROOT/etc/profile.d/healer-first-run.sh"
-
-chmod 755 "$PKGROOT/opt/healer/healer" "$PKGROOT/opt/healer/healer-setup" \
-    "$PKGROOT/opt/healer/healer-status" "$PKGROOT/etc/profile.d/healer-first-run.sh"
-chmod 644 "$PKGROOT/opt/healer/healer.service"
+# healer-first-run.sh moves OUT of /opt/healer to its Debian-conventional /etc/profile.d location —
+# dpkg can track arbitrary install paths, unlike build-payload.sh's flat layout (shared with the
+# tarball path, where everything has to stay under one root because that's all `tar -xzf` extracts
+# to). healer.service deliberately STAYS inside /opt/healer for the .deb too — see
+# docs/ARCHITECTURE.md for why (Healer.Setup.Logic.HealerInstaller already expects it there).
+mv "$PKGROOT/opt/healer/healer-first-run.sh" "$PKGROOT/etc/profile.d/healer-first-run.sh"
+chmod 755 "$PKGROOT/etc/profile.d/healer-first-run.sh"
 
 # /usr/bin, NOT /usr/local/bin: a real install via the tarball path (deploy/bootstrap.sh, which
 # used /usr/local/bin at the time) reported "command not found" for both plain and `sudo`-prefixed

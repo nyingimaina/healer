@@ -223,15 +223,16 @@ dotnet build Healer.slnx
 dotnet test Healer.slnx
 ```
 
-Publishing the daemon itself requires native Linux (see `docs/RUNBOOK.md`):
+Publishing requires native Linux (see `docs/RUNBOOK.md`) — `deploy/build-payload.sh` publishes all
+three binaries and assembles them correctly in one step (the same script the `.deb` build and the
+GitHub Actions release workflow both use, so there's exactly one place this logic lives):
 
 ```sh
-dotnet publish src/Healer.Host -c Release -r linux-x64   --self-contained true -p:PublishAot=true
-dotnet publish src/Healer.Host -c Release -r linux-arm64 --self-contained true -p:PublishAot=true
+./deploy/build-payload.sh linux-x64 publish/bundle
 ```
 
 `Healer.Setup`/`Healer.Status` target `net10.0` (Terminal.Gui 2.4.17's minimum) and publish as
-ordinary self-contained (non-AOT) apps — they're one-shot/on-demand tools, not the always-on daemon,
-so they aren't under the same footprint/trim constraints.
+self-contained, single-file (non-AOT) apps — they're one-shot/on-demand tools, not the always-on
+daemon, so they aren't under the same footprint/trim constraints.
 
 See `docs/ARCHITECTURE.md` for the design rationale and `docs/RUNBOOK.md` for rollout guidance.

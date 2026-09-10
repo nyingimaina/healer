@@ -341,24 +341,15 @@ every time you want an updated build.
    `D:`, WSL sees it as `/mnt/d/...`):
    ```sh
    cd /mnt/d/work/nyingi/code/systems/healer
-   dotnet publish src/Healer.Host -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o publish/host
-   dotnet publish src/Healer.Setup -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/setup
-   dotnet publish src/Healer.Status -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/status
-   mkdir -p publish/bundle
-   cp publish/host/healer publish/host/libe_sqlite3.so deploy/healer.service deploy/healer-first-run.sh publish/bundle/
-   cp publish/setup/healer-setup publish/bundle/healer-setup.bin
-   cp publish/status/healer-status publish/bundle/healer-status.bin
-   for name in healer-setup healer-status; do
-     printf '#!/bin/sh\nexport DOTNET_BUNDLE_EXTRACT_BASE_DIR="/opt/healer/.extract"\nexec "/opt/healer/%s.bin" "$@"\n' "$name" > "publish/bundle/$name"
-   done
-   chmod +x publish/bundle/healer publish/bundle/libe_sqlite3.so publish/bundle/healer-setup publish/bundle/healer-status publish/bundle/healer-setup.bin publish/bundle/healer-status.bin publish/bundle/healer-first-run.sh
+   ./deploy/build-payload.sh linux-x64 publish/bundle
    ```
-   (`PublishSingleFile`/`IncludeNativeLibrariesForSelfExtract` bundle Setup/Status into one real
-   executable each instead of ~200 loose files; `libe_sqlite3.so` is the daemon's native SQLite
-   dependency, which Native AOT doesn't fold into `healer` itself; the wrapper scripts pin where
-   Setup/Status extract their native libraries to at runtime, since .NET's automatic fallback for
-   that isn't reliable across different invocation contexts. All three are load-bearing — see
-   `docs/ARCHITECTURE.md` if you're curious why.)
+   This is the exact same script `deploy/build-deb.sh` (Option C) and the GitHub Actions release
+   workflow (Option A) both call — it publishes all three binaries and assembles them, correctly,
+   into `publish/bundle/`. (Publishing Setup/Status as a genuine single-file executable each rather
+   than ~200 loose files, shipping the daemon's native SQLite dependency alongside it, and pinning
+   where the single-file binaries extract to at runtime are all load-bearing, non-obvious steps —
+   see `docs/ARCHITECTURE.md` if you're curious why; the point of one shared script is that you don't
+   need to know any of that to get a correct build.)
    This works because WSL runs a genuine Linux kernel (not a translation layer), and since almost
    every Windows PC is an x64/amd64 machine, that's an x64 Linux kernel — so `linux-x64` here is a
    same-architecture native build, not a cross-compile, exactly like building it on a real Ubuntu box.

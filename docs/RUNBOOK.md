@@ -4,25 +4,27 @@
 
 1. `dotnet build Healer.slnx && dotnet test Healer.slnx` — confirm the full suite is green before
    publishing anything.
-2. **AOT publish spike (do this before relying on it for anything else)**: publish `Healer.Host` for
-   both RIDs **from native Linux** — a GitHub Actions Linux runner or a Linux SDK container/buildx.
-   Windows cannot reliably cross-compile Native AOT for Linux.
+2. **From native Linux** (a GitHub Actions Linux runner, a Linux SDK container/buildx, or WSL —
+   Windows cannot reliably cross-compile Native AOT for Linux), run `deploy/build-payload.sh` for
+   each RID you need:
    ```sh
-   dotnet publish src/Healer.Host -c Release -r linux-x64   --self-contained true -p:PublishAot=true
-   dotnet publish src/Healer.Host -c Release -r linux-arm64 --self-contained true -p:PublishAot=true
+   ./deploy/build-payload.sh linux-x64   payload-x64
+   ./deploy/build-payload.sh linux-arm64 payload-arm64
    ```
+   This is the single script that publishes `Healer.Host` (Native AOT), `Healer.Setup`/`Healer.Status`
+   (self-contained, `PublishSingleFile` — NOT AOT, see `docs/ARCHITECTURE.md` for why each of these
+   choices is load-bearing, not incidental) and assembles the result — `healer`, `libe_sqlite3.so`,
+   the `healer-setup`/`healer-status` wrapper scripts, `healer.service`, `healer-first-run.sh` — into
+   the given output directory. `deploy/build-deb.sh` and `.github/workflows/release.yml` both call it
+   too, so a fix made here reaches every packaging path at once.
    Watch the publish output for trim warnings — particularly around `Microsoft.Data.Sqlite` and
    Serilog's file sink, both flagged as "should work, verify" rather than guaranteed-safe. Neither
    uses object destructuring or complex reflection in how Healer uses them, which is the main risk
    surface for each.
-3. `dotnet publish src/Healer.Setup -c Release -r linux-x64 --self-contained true` and the same for
-   `Healer.Status` and `linux-arm64` — these are NOT AOT-published (see ARCHITECTURE.md for why).
-4. Package `healer` (from Host), `healer-setup`, `healer-status`, `deploy/healer.service`, and
-   `deploy/healer-first-run.sh` into a release tarball per architecture (`healer-linux-x64.tar.gz`,
-   `healer-linux-arm64.tar.gz`), published wherever `deploy/bootstrap.sh`'s
-   `HEALER_RELEASE_BASE_URL` points. `healer-first-run.sh` must be present — `bootstrap.sh` copies
-   it from the extracted install directory to `/etc/profile.d/`, and that's what makes the wizard
-   trigger automatically on first interactive login (see below).
+3. Package the resulting `payload-<rid>/` directory into a release tarball per architecture
+   (`tar -czf healer-linux-x64.tar.gz -C payload-x64 .`), published wherever `deploy/bootstrap.sh`'s
+   `HEALER_RELEASE_BASE_URL` points — or skip this and use `deploy/build-deb.sh` directly for a
+   single-file `.deb` instead (see `docs/DEPLOY-FROM-WINDOWS.md` Option C).
 
 ## Three ways a box gets set up
 

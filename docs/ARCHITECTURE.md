@@ -274,10 +274,19 @@ binaries is a real maintenance hazard — a fix applied to one silently does not
 three-part bug (no `PublishSingleFile`, no `libe_sqlite3.so`, no extraction-dir wrapper) was also
 present, independently, in `docs/DEPLOY-FROM-WINDOWS.md`'s "Option B" manual copy-paste
 instructions — a THIRD hand-maintained copy of the same publish/package logic that nobody had
-walked through end-to-end either. Fixed the same way. At three independent copies of this logic
-(`build-deb.sh`, `release.yml`, and now a markdown doc), the case for actually extracting a single
-shared "assemble the payload" script all three call — rather than a fourth copy-paste — is no
-longer hypothetical.
+walked through end-to-end either.
+
+**Consolidated, not just fixed a third time**: at three independent copies of the same publish +
+assemble logic, patching each one again the next time a bug surfaces was no longer a reasonable bet.
+**`deploy/build-payload.sh`** is now the single source of truth — given a RID and an output
+directory, it runs all three `dotnet publish` commands and assembles `healer`, `libe_sqlite3.so`,
+the `.extract/` directory, the `healer-setup`/`healer-status` wrapper-plus-`.bin` pairs, and
+`healer.service`/`healer-first-run.sh` into one flat tree. `build-deb.sh` calls it and then only adds
+what's genuinely `.deb`-specific (`DEBIAN/` control metadata, the `/usr/bin` symlinks, relocating
+`healer-first-run.sh` to `/etc/profile.d` since dpkg can track arbitrary paths); `release.yml` calls
+it and just `tar czf`s the result; the Option B doc now tells a human to run it directly instead of
+copy-pasting its internals a fourth time. A fix applied here now genuinely reaches all three paths
+by construction, not by remembering to port it three times.
 
 **A fourth real bug, found the same way (a real install, not code review): `/usr/local/bin` is not
 reliably on every box's `PATH`, or on `sudo`'s own `secure_path`.** A real EC2 box reported
