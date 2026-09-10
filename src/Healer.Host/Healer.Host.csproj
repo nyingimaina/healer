@@ -33,4 +33,12 @@
     <ProjectReference Include="..\Healer.Core\Healer.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Lets Healer.Host.Tests unit-test DockerComposeRestartExecutor.ResolveComposeCommand, an
+         internal pure decision function, without making it public API. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Healer.Host.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
 </Project>

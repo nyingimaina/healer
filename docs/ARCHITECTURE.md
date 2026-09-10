@@ -269,6 +269,22 @@ CLI already does correctly. `Healer.Host.Docker.DockerComposeRestartExecutor` sh
 `docker compose restart` (via `System.Diagnostics.Process`, `WorkingDirectory` set to the
 configured project directory) rather than duplicating compose's own orchestration.
 
+**v1 (`docker-compose`) vs. v2 (`docker compose`) detection**: Docker Compose ships two
+incompatible invocation shapes — the current CLI plugin, run as a `docker` subcommand (`docker
+compose ...`), and the older standalone binary some existing boxes still have instead (`docker-compose
+...`, hyphenated, no `docker` prefix). A box with only v1 installed has no `docker compose`
+subcommand at all, so hardcoding the v2 shape would silently break this feature there.
+`DockerComposeRestartExecutor` probes for both — `docker compose version` first, then
+`docker-compose version` — on every restart call (not cached, since this only runs on a
+weekly/monthly schedule, not per-tick, so the cost of re-probing is irrelevant, and it means a
+Compose upgrade takes effect without a daemon restart) and picks whichever succeeds via
+`ResolveComposeCommand`, a pure `internal` function taking two plain `bool`s specifically so it's
+unit-testable without mocking process execution — the actual probing stays untested I/O, consistent
+with the rest of `Healer.Host`'s thin wrappers. If neither is available, it throws a clear error
+naming both things it tried, which flows through the existing dry-run/live action-outcome pipeline
+exactly like any other failed action (a `Failed` entry in Telegram/`healer-status` history) — no
+special-case handling needed.
+
 **Why all-at-once, not staggered like other restarts**: every other restart path in
 `HealingEngine` (crash-loop, critical-threshold, pre-emptive worst-offender) restarts exactly one
 container at a time, gated by `CooldownGate`'s per-tick concurrency cap — deliberately, since those
