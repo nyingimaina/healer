@@ -20,11 +20,7 @@ public static class ThresholdEvaluator
 
         EvaluateHost(host, thresholds, incidents);
 
-        // How many RUNNING containers are competing for host memory with no mem_limit of their own -
-        // drives AdaptiveMemoryThreshold's fair-share fallback below. Docker is queried with all=true
-        // (see DockerSocketHttpClient), so `containers` includes stopped/exited ones too - a stopped
-        // container uses no memory and must NOT dilute the fair share of one that's actually running.
-        var unlimitedContainerCount = containers.Count(c => c.IsRunning && (c.MemLimitBytes is not { } limit || limit <= 0));
+        var unlimitedContainerCount = ContainerCounts.RunningWithNoMemLimit(containers);
 
         foreach (var container in containers)
         {

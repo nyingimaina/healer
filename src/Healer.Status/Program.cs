@@ -2,6 +2,7 @@
 // instance-based API in this v2 release; still fully functional for a simple single-window app.
 
 using System.Collections.ObjectModel;
+using Healer.Core.Decision;
 using Healer.Core.Models;
 using Healer.Host.Config;
 using Healer.Host.Docker;
@@ -114,7 +115,7 @@ try
 
             var host = await hostMetricsProvider.GetHostMetricsAsync(CancellationToken.None);
             var containers = await containerRuntime.ListContainersAsync(CancellationToken.None);
-            var unhealthy = containers.Count(c => c.HealthStatus == ContainerHealthStatus.Unhealthy);
+            var unhealthy = ContainerCounts.Unhealthy(containers);
             liveLabel.Text = ActionHistoryFormatter.FormatLiveSummary(host, containers.Count, unhealthy);
 
             var trend = await historyStore.QueryTrendAsync("host.mem", DateTimeOffset.UtcNow.AddHours(-24), CancellationToken.None);
