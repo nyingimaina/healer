@@ -20,6 +20,7 @@ public sealed class HealingEngine
     private readonly INotifier _notifier;
     private readonly IHealthHistoryStore _historyStore;
     private readonly IComposeRestartExecutor _composeRestartExecutor;
+    private readonly IEmergencyStopSignal _emergencyStopSignal;
     private readonly HealerConfig _config;
     private readonly TimeProvider _timeProvider;
     private readonly Action<string, Exception> _onWarning;
@@ -32,6 +33,7 @@ public sealed class HealingEngine
         INotifier notifier,
         IHealthHistoryStore historyStore,
         IComposeRestartExecutor composeRestartExecutor,
+        IEmergencyStopSignal emergencyStopSignal,
         HealerConfig config,
         TimeProvider? timeProvider = null,
         Action<string, Exception>? onWarning = null)
@@ -43,6 +45,7 @@ public sealed class HealingEngine
         _notifier = notifier;
         _historyStore = historyStore;
         _composeRestartExecutor = composeRestartExecutor;
+        _emergencyStopSignal = emergencyStopSignal;
         _config = config;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _onWarning = onWarning ?? ((_, _) => { });
@@ -52,6 +55,11 @@ public sealed class HealingEngine
     {
         var now = _timeProvider.GetUtcNow();
         var state = await _stateStore.LoadAsync(ct);
+
+        // Checked once per tick, at the very top: whichever origin (a human via healer-disable/
+        // Ctrl+D in healer-status, or EmergencyActionRateBreaker tripping itself), the sentinel's
+        // presence is treated identically to DryRun=true for every mutating action this tick.
+        var disabledReason = await _emergencyStopSignal.GetDisabledReasonAsync(ct);
 
         var host = await _hostMetricsProvider.GetHostMetricsAsync(ct);
         var containers = await _containerRuntime.ListContainersAsync(ct);
@@ -77,7 +85,7 @@ public sealed class HealingEngine
 
         foreach (var action in chosen)
         {
-            await ExecuteChosenActionAsync(action, state, now, ct);
+            await ExecuteChosenActionAsync(action, state, now, ct, disabledReason);
         }
 
         await MaybeRecordSnapshotAsync(host, containers, state, now, ct);
@@ -194,14 +202,20 @@ public sealed class HealingEngine
         return result;
     }
 
-    private async Task ExecuteChosenActionAsync(PlannedAction action, HealerState state, DateTimeOffset now, CancellationToken ct)
+    private async Task ExecuteChosenActionAsync(PlannedAction action, HealerState state, DateTimeOffset now, CancellationToken ct, string? disabledReason)
     {
-        if (_config.DryRun)
+        if (_config.DryRun || disabledReason is not null)
         {
-            var dryRunOutcome = new ActionOutcome { Action = action, Status = ActionOutcomeStatus.DryRun, TimestampUtc = now };
-            await NotifyAndRecordAsync(dryRunOutcome, state, ct);
+            var status = disabledReason is not null ? ActionOutcomeStatus.Disabled : ActionOutcomeStatus.DryRun;
+            var skippedOutcome = new ActionOutcome { Action = action, Status = status, TimestampUtc = now, Detail = disabledReason };
+            await NotifyAndRecordAsync(skippedOutcome, state, ct);
             return;
         }
+
+        // Every mutation attempt from here on counts toward the emergency breaker's rolling window —
+        // recorded BEFORE executing (an attempt, not just a success), so a bug causing rapid FAILED
+        // attempts trips this exactly as readily as rapid successful ones would.
+        await RecordMutatingActionAndMaybeTripBreakerAsync(action, state, now, ct);
 
         if (action.Type == ActionType.ScheduledHostReboot)
         {
@@ -224,6 +238,43 @@ public sealed class HealingEngine
 
         var outcome = await ExecuteLiveActionAsync(action, state, now, ct);
         await NotifyAndRecordAsync(outcome, state, ct);
+    }
+
+    /// <summary>The last-resort tripwire — see <see cref="EmergencyActionRateBreaker"/>. Records every
+    /// mutation attempt into the rolling window and, if it trips, writes the sentinel file, records an
+    /// <see cref="ActionType.EmergencyStopTripped"/> history row, and sends one unconditional Telegram
+    /// alert with a concrete breakdown of what was thrashing.</summary>
+    private async Task RecordMutatingActionAndMaybeTripBreakerAsync(PlannedAction action, HealerState state, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!_config.EmergencyBreaker.Enabled)
+        {
+            return;
+        }
+
+        var newEntry = new RecentMutatingAction(now, action.Type, action.Target);
+        var window = TimeSpan.FromMinutes(_config.EmergencyBreaker.WindowMinutes);
+        var (updated, shouldTrip) = EmergencyActionRateBreaker.RecordAndEvaluate(
+            state.RecentMutatingActions, newEntry, window, _config.EmergencyBreaker.MaxActionsInWindow);
+        state.RecentMutatingActions = updated.ToList();
+
+        if (!shouldTrip)
+        {
+            return;
+        }
+
+        var reason = $"{updated.Count} mutating actions in {_config.EmergencyBreaker.WindowMinutes} minute(s), exceeding the configured limit of {_config.EmergencyBreaker.MaxActionsInWindow}.";
+        await _emergencyStopSignal.DisableAsync(reason, ct);
+
+        var alertMessage = MessageFormatter.FormatEmergencyStopAlert(
+            updated.Count, _config.EmergencyBreaker.MaxActionsInWindow, _config.EmergencyBreaker.WindowMinutes, updated);
+        var trippedOutcome = new ActionOutcome
+        {
+            Action = new PlannedAction { Type = ActionType.EmergencyStopTripped, Target = "host", Reason = "action-rate limit exceeded" },
+            Status = ActionOutcomeStatus.Success,
+            TimestampUtc = now,
+            Detail = alertMessage,
+        };
+        await NotifyAndRecordAsync(trippedOutcome, state, ct);
     }
 
     private async Task<ActionOutcome> ExecuteLiveActionAsync(PlannedAction action, HealerState state, DateTimeOffset now, CancellationToken ct)
@@ -410,7 +461,12 @@ public sealed class HealingEngine
         // durable audit trail (browsable via Healer.Status), separate from what interrupts a phone.
         if (ShouldSendToTelegram(outcome, state))
         {
-            var message = MessageFormatter.FormatActionOutcome(outcome);
+            // EmergencyStopTripped carries its own fully-formed alert (with the per-action breakdown)
+            // in Detail — FormatActionOutcome's generic "Done: disable itself (emergency stop) —
+            // action-rate limit exceeded" wording would lose all of that diagnostic detail.
+            var message = outcome.Action.Type == ActionType.EmergencyStopTripped
+                ? outcome.Detail!
+                : MessageFormatter.FormatActionOutcome(outcome);
             await _notifier.SendAsync(MessageFormatter.WithServerPrefix(_config.ServerName, message), ct);
         }
 
@@ -458,6 +514,9 @@ public sealed class HealingEngine
             ActionOutcomeStatus.SkippedCircuitOpen => true,
             ActionOutcomeStatus.DryRun => true,
             ActionOutcomeStatus.Success when isEligibleForBackoff => true, // backoff disabled (checked above) — old always-notify behavior
+            // Unconditional — bypasses NotificationLevel entirely, same as the other "always notify"
+            // cases in this system: the operator must never miss Healer disabling itself.
+            ActionOutcomeStatus.Success when outcome.Action.Type == ActionType.EmergencyStopTripped => true,
             _ => false,
         };
     }

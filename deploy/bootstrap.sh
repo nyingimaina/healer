@@ -55,16 +55,19 @@ curl -fsSL "$HEALER_RELEASE_BASE_URL/healer-$RID.tar.gz" -o /tmp/healer-release.
 tar -xzf /tmp/healer-release.tar.gz -C "$INSTALL_DIR"
 rm -f /tmp/healer-release.tar.gz
 chmod +x "$INSTALL_DIR/healer" "$INSTALL_DIR/healer-setup" "$INSTALL_DIR/healer-status" \
-    "$INSTALL_DIR/healer-setup.bin" "$INSTALL_DIR/healer-status.bin" 2>/dev/null || true
+    "$INSTALL_DIR/healer-setup.bin" "$INSTALL_DIR/healer-status.bin" \
+    "$INSTALL_DIR/healer-disable.sh" "$INSTALL_DIR/healer-enable.sh" 2>/dev/null || true
 
-# Convenience: `healer-setup`/`healer-status` from anywhere, not the full /opt/healer/ path.
-# /usr/bin specifically, NOT /usr/local/bin: confirmed by a real install where plain `healer-status`
-# (and even `sudo healer-status`) reported "command not found" despite the symlink existing, because
-# that box's PATH (and/or sudo's own secure_path) didn't include /usr/local/bin. /usr/bin is on
-# every user's PATH and every sudo secure_path unconditionally, with no known exceptions, since it's
-# where core system commands themselves live.
+# Convenience: `healer-setup`/`healer-status`/`healer-disable`/`healer-enable` from anywhere, not the
+# full /opt/healer/ path. /usr/bin specifically, NOT /usr/local/bin: confirmed by a real install
+# where plain `healer-status` (and even `sudo healer-status`) reported "command not found" despite
+# the symlink existing, because that box's PATH (and/or sudo's own secure_path) didn't include
+# /usr/local/bin. /usr/bin is on every user's PATH and every sudo secure_path unconditionally, with
+# no known exceptions, since it's where core system commands themselves live.
 ln -sf "$INSTALL_DIR/healer-setup" /usr/bin/healer-setup
 ln -sf "$INSTALL_DIR/healer-status" /usr/bin/healer-status
+ln -sf "$INSTALL_DIR/healer-disable.sh" /usr/bin/healer-disable
+ln -sf "$INSTALL_DIR/healer-enable.sh" /usr/bin/healer-enable
 
 # The first-login trigger: fires on every interactive login until Healer is configured, so a box
 # that finishes this script non-interactively (User Data) WITHOUT usable Telegram env vars still

@@ -20,6 +20,7 @@ public class HealingEngineTests
         public FakeNotifier Notifier { get; } = new();
         public FakeHistoryStore HistoryStore { get; } = new();
         public FakeComposeRestartExecutor ComposeRestartExecutor { get; } = new();
+        public FakeEmergencyStopSignal EmergencyStopSignal { get; } = new();
         public FakeTimeProvider TimeProvider { get; } = new(T0);
         public List<(string Message, Exception Ex)> Warnings { get; } = [];
 
@@ -27,7 +28,7 @@ public class HealingEngineTests
 
         public HealingEngine BuildEngine() => new(
             ContainerRuntime, HostSystemActions, HostMetrics, StateStore, Notifier, HistoryStore,
-            ComposeRestartExecutor, Config, TimeProvider, (msg, ex) => Warnings.Add((msg, ex)));
+            ComposeRestartExecutor, EmergencyStopSignal, Config, TimeProvider, (msg, ex) => Warnings.Add((msg, ex)));
 
         public Task Tick() => BuildEngine().RunTickAsync(CancellationToken.None);
     }
@@ -600,5 +601,58 @@ public class HealingEngineTests
 
         Assert.NotEmpty(h.Warnings);
         Assert.NotEmpty(h.Notifier.SentMessages); // notification still succeeds even though history recording failed
+    }
+
+    [Fact]
+    public async Task Live_EmergencyBreakerTrips_WhenMutatingActionsExceedTheConfiguredLimit()
+    {
+        var h = new Harness { Config = new HealerConfig { ServerName = "test-server", DryRun = false } };
+        h.StateStore.State.RecentMutatingActions = Enumerable.Range(0, 15)
+            .Select(i => new RecentMutatingAction(T0.AddSeconds(i), ActionType.CrashLoopRestart, "other"))
+            .ToList();
+        h.ContainerRuntime.Containers.Add(Container("crashy", health: ContainerHealthStatus.Unhealthy, unhealthyFor: TimeSpan.FromSeconds(120)));
+
+        await h.Tick();
+
+        // The action that pushes the count over the limit still executes — the breaker trips
+        // AFTER recording the attempt, it doesn't retroactively block it.
+        Assert.Contains("crashy", h.ContainerRuntime.RestartCalls);
+        Assert.NotNull(h.EmergencyStopSignal.DisabledReason);
+        Assert.Contains(h.HistoryStore.ActionRecords, a => a.Action.Type == ActionType.EmergencyStopTripped);
+        Assert.Contains(h.Notifier.SentMessages, m => m.Contains("Healer has disabled itself automatically"));
+        Assert.Contains(h.Notifier.SentMessages, m => m.Contains("15x restart other (crash loop)"));
+        Assert.Contains(h.Notifier.SentMessages, m => m.Contains("healer-enable"));
+    }
+
+    [Fact]
+    public async Task Live_WhenDisabledSentinelIsSet_ActionsAreSkippedSilently_ButRecordedToHistory()
+    {
+        var h = new Harness { Config = new HealerConfig { ServerName = "test-server", DryRun = false, NotificationLevel = NotificationLevel.ProblemsOnly } };
+        h.EmergencyStopSignal.DisabledReason = "manual test";
+        h.ContainerRuntime.Containers.Add(Container("crashy", health: ContainerHealthStatus.Unhealthy, unhealthyFor: TimeSpan.FromSeconds(120)));
+
+        await h.Tick();
+
+        Assert.Empty(h.ContainerRuntime.RestartCalls);
+        Assert.Contains(h.HistoryStore.ActionRecords, a => a.Status == ActionOutcomeStatus.Disabled);
+        Assert.DoesNotContain(h.Notifier.SentMessages, m => m.Contains("DISABLED"));
+    }
+
+    [Fact]
+    public async Task Live_EmergencyBreakerDisabledInConfig_NeverTrips_EvenWithManyRecentActions()
+    {
+        var h = new Harness
+        {
+            Config = new HealerConfig { ServerName = "test-server", DryRun = false, EmergencyBreaker = new EmergencyBreakerConfig { Enabled = false } },
+        };
+        h.StateStore.State.RecentMutatingActions = Enumerable.Range(0, 50)
+            .Select(i => new RecentMutatingAction(T0.AddSeconds(i), ActionType.CrashLoopRestart, "other"))
+            .ToList();
+        h.ContainerRuntime.Containers.Add(Container("crashy", health: ContainerHealthStatus.Unhealthy, unhealthyFor: TimeSpan.FromSeconds(120)));
+
+        await h.Tick();
+
+        Assert.Null(h.EmergencyStopSignal.DisabledReason);
+        Assert.DoesNotContain(h.HistoryStore.ActionRecords, a => a.Action.Type == ActionType.EmergencyStopTripped);
     }
 }

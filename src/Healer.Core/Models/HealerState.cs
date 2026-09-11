@@ -1,3 +1,5 @@
+using Healer.Core.Decision;
+
 namespace Healer.Core.Models;
 
 public enum CircuitState
@@ -72,6 +74,12 @@ public sealed class HealerState
 
     /// <summary>Per scheduled action, keyed "ActionType:Target" (e.g. "ScheduledComposeRestart:milele") — see <see cref="Decision.ScheduledSuccessNotificationGate"/>.</summary>
     public Dictionary<string, ScheduledActionNotifyState> ScheduledSuccessNotify { get; set; } = [];
+
+    /// <summary>Rolling window of every mutating action Healer has attempted recently, regardless of
+    /// type/target — see <see cref="Decision.EmergencyActionRateBreaker"/>. Pruned to the configured
+    /// window each time a new one is recorded; never explicitly cleared (a genuinely quiet period
+    /// ages entries out naturally on the next mutation, whenever that happens).</summary>
+    public List<RecentMutatingAction> RecentMutatingActions { get; set; } = [];
 
     public ContainerRuntimeState GetOrAddContainer(string name)
     {

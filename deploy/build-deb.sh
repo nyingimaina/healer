@@ -67,6 +67,8 @@ chmod 755 "$PKGROOT/etc/profile.d/healer-first-run.sh"
 # accepted policy deviation.
 ln -sf /opt/healer/healer-setup "$PKGROOT/usr/bin/healer-setup"
 ln -sf /opt/healer/healer-status "$PKGROOT/usr/bin/healer-status"
+ln -sf /opt/healer/healer-disable.sh "$PKGROOT/usr/bin/healer-disable"
+ln -sf /opt/healer/healer-enable.sh "$PKGROOT/usr/bin/healer-enable"
 
 echo "== Writing package metadata =="
 INSTALLED_SIZE_KB=$(du -sk --exclude="$PKGROOT/DEBIAN" "$PKGROOT" 2>/dev/null | cut -f1 || echo 0)

@@ -31,6 +31,60 @@ must always happen — but every *mutating* call is gated behind `if (!config.Dr
 convention callers have to remember; it's structural. `HealingEngineTests` asserts a full scripted
 multi-incident dry-run scenario produces zero calls into any mutating fake.
 
+## Emergency kill switch: manual disable + a self-tripping breaker
+
+Every throttle described elsewhere in this doc — the per-container circuit breaker, the global
+cooldown, systemd's own resource limits — assumes Healer's decision logic itself is working
+correctly. None of it protects against a bug in Healer bypassing its own throttles and genuinely
+thrashing, and none of it gives a human a fast, discoverable way to just turn it off under pressure.
+Two mechanisms exist for this, deliberately sharing one piece of state rather than being separate
+features:
+
+- **Manual**: `healer-disable`/`healer-enable` (plain shell scripts — a file touch/read/remove needs
+  no compiled binary) and a `Ctrl+D` hotkey in `healer-status`, for whoever's already staring at the
+  dashboard when something looks wrong.
+- **Automatic**: `Healer.Core.Decision.EmergencyActionRateBreaker`, a pure, engine-wide rolling-window
+  counter over *every* mutating action attempted (success or failure — a bug causing rapid failed
+  attempts is just as concerning as rapid successful ones), wired into exactly one call site in
+  `HealingEngine.ExecuteChosenActionAsync`.
+
+Both converge on **one sentinel file**, `<config-directory>/DISABLED` (normally
+`/etc/healer/DISABLED`, derived from wherever `healer.json` lives) — `Healer.Core.Abstractions.IEmergencyStopSignal`
+is the read/write abstraction, `Healer.Host.EmergencyStop.FileEmergencyStopSignal` the real
+implementation. Its presence is treated exactly like `DryRun = true` for every mutating action, one
+extra `||` at the same early-return `ExecuteChosenActionAsync` already had — reusing the already-tested
+dry-run gate mechanically rather than inventing a parallel code path. Whether a human or Healer itself
+created the file, the daemon (and `healer-status`, and the shell scripts) treat it identically: one
+mental model, one command back (`sudo healer-enable`), regardless of origin.
+
+**Why the automatic breaker's threshold is set where it is**: deliberately *above* what the existing
+`CooldownGate` should ever physically allow, not a duplicate of it. With the default 90s global
+cooldown, ~10 actions/15min is already the theoretical ceiling if cooldown is working correctly — so
+the default `maxActionsInWindow = 15` over `windowMinutes = 15` can only be reached if the cooldown
+itself is broken. This makes it a true last-resort tripwire that should never fire under any
+legitimate operation, however aggressive, rather than redundant throttling.
+
+**Why the trip alert carries a concrete breakdown, not just a count**: `RecentMutatingAction` records
+`(Timestamp, ActionType, Target)` per attempt, not a bare timestamp, specifically so
+`MessageFormatter.FormatEmergencyStopAlert` can group the window by `(Type, Target)` and tell you
+*what* was thrashing ("14x restart 'web' (crash loop)") rather than just *that* something was. This
+alert always sends regardless of `notificationLevel` — the operator must never miss Healer disabling
+itself — the same "always notify" treatment applied elsewhere to disruptive/critical events.
+
+**Why `ActionOutcomeStatus.Disabled` is treated differently from `DryRun` for notifications**: both
+represent "would have done X, but didn't," and both are recorded to history identically. But `DryRun`
+is an ongoing, deliberate operator choice to see every incident, while `Disabled` is an emergency
+state the operator already knows about — from the one-time trip alert, or from disabling it
+themselves. Repeating that fact on every tick would be exactly the notification fatigue the rest of
+this system exists to avoid, so `Disabled` outcomes stay silent on Telegram under `ProblemsOnly`
+(still fully visible in `healer-status`'s history) while `DryRun` outcomes keep notifying as before.
+
+**Why there's no auto-resume**: same GFCI-breaker mentality as the reboot-verification `TimedOut`
+case elsewhere in this doc — if the underlying cause is a persistent bug, auto-retrying just re-trips
+immediately and wastes the interval in between. A human has to look and explicitly run
+`healer-enable`, which always prints the recorded reason before clearing the sentinel, so nobody
+clears an emergency stop blind.
+
 ## Telegram noise control
 
 Every notification passes through `HealingEngine.ShouldSendToTelegram`, which — under the default

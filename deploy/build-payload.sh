@@ -115,4 +115,12 @@ cp deploy/healer-first-run.sh "$OUTPUT_DIR/healer-first-run.sh"
 chmod 644 "$OUTPUT_DIR/healer.service"
 chmod 755 "$OUTPUT_DIR/healer" "$OUTPUT_DIR/healer-first-run.sh"
 
+# The manual half of the emergency kill switch (see Healer.Core.Abstractions.IEmergencyStopSignal /
+# Healer.Core.Decision.EmergencyActionRateBreaker) -- plain POSIX shell, no compiled binary needed
+# for a file touch/read/remove. Both derive the sentinel path from HEALER_CONFIG_PATH themselves, so
+# nothing here needs to pass that through.
+cp deploy/healer-disable.sh "$OUTPUT_DIR/healer-disable.sh"
+cp deploy/healer-enable.sh "$OUTPUT_DIR/healer-enable.sh"
+chmod 755 "$OUTPUT_DIR/healer-disable.sh" "$OUTPUT_DIR/healer-enable.sh"
+
 echo "== Payload ready at $OUTPUT_DIR =="

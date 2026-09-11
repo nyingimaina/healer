@@ -310,6 +310,24 @@ to export the *full* log file (not just what's visible on screen) to a timestamp
 `cat`/`scp` off the box — a full-screen terminal app like this one can't be copied from with a
 normal mouse-drag selection past whatever's currently displayed.
 
+If Healer ever looks like it's misbehaving — thrashing, restarting things too aggressively — press
+**Ctrl+D** right there in `healer-status` to disable it immediately, or from any shell:
+
+```sh
+sudo healer-disable "investigating unexpected restarts"
+```
+
+This stops all automatic action (detection and Telegram alerts keep working) without touching config
+or restarting the daemon. Healer can also disable itself automatically if it ever takes far more
+actions than should be possible under normal operation, alerting you via Telegram with details of
+what was thrashing. Either way, resume with:
+
+```sh
+sudo healer-enable
+```
+
+which prints the recorded reason before clearing it.
+
 See `docs/README.md`'s **Commands reference** for the complete list of commands (including
 `journalctl`/restart/enable checks) with copy-pasteable examples.
 

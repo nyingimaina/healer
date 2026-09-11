@@ -112,6 +112,19 @@ public sealed record ScheduledSuccessBackoffConfig(
     bool Enabled = true,
     int MaxSkip = 16);
 
+/// <summary>
+/// Last-resort, engine-wide tripwire — see <see cref="Decision.EmergencyActionRateBreaker"/>.
+/// Deliberately set <see cref="MaxActionsInWindow"/>/<see cref="WindowMinutes"/> well above what
+/// <see cref="RestartPolicyConfig.GlobalActionCooldownSeconds"/> should ever physically allow (e.g.
+/// the 90s default cooldown caps out around 10 actions/15min) — this should never fire under any
+/// legitimate operation, however aggressive, only when something is bypassing Healer's own
+/// throttles. Set <see cref="Enabled"/> to false to turn this off entirely.
+/// </summary>
+public sealed record EmergencyBreakerConfig(
+    bool Enabled = true,
+    int MaxActionsInWindow = 15,
+    int WindowMinutes = 15);
+
 public sealed record ScheduledRebootsConfig(
     RebootSchedule? Host = null,
     IReadOnlyList<ContainerSchedule>? Containers = null)
@@ -134,6 +147,7 @@ public sealed record HealerConfig(
     ScheduledRebootsConfig? ScheduledReboots = null,
     ScheduledComposeRestartsConfig? ScheduledComposeRestarts = null,
     ScheduledSuccessBackoffConfig? ScheduledSuccessBackoff = null,
+    EmergencyBreakerConfig? EmergencyBreaker = null,
     IReadOnlyList<ContainerOverrideConfig>? ContainerOverrides = null,
     HistoryConfig? History = null,
     LoggingConfig? Logging = null)
@@ -152,6 +166,7 @@ public sealed record HealerConfig(
     public ScheduledRebootsConfig ScheduledReboots { get; init; } = ScheduledReboots ?? new();
     public ScheduledComposeRestartsConfig ScheduledComposeRestarts { get; init; } = ScheduledComposeRestarts ?? new();
     public ScheduledSuccessBackoffConfig ScheduledSuccessBackoff { get; init; } = ScheduledSuccessBackoff ?? new();
+    public EmergencyBreakerConfig EmergencyBreaker { get; init; } = EmergencyBreaker ?? new();
     public IReadOnlyList<ContainerOverrideConfig> ContainerOverrides { get; init; } = ContainerOverrides ?? [];
     public HistoryConfig History { get; init; } = History ?? new();
     public LoggingConfig Logging { get; init; } = Logging ?? new();

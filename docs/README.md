@@ -124,10 +124,37 @@ populate (Docker denies the socket read) even though the rest of the screen stil
 Keys: **Ctrl+Q** to quit. **Ctrl+E** to export the *full* log file (not just what's visible on
 screen) to a timestamped file next to it — a full-screen terminal app like this one can't be copied
 from with a normal mouse-drag selection past whatever's currently displayed, so the exported file is
-what you `cat`/`scp` out over the same SSH session.
+what you `cat`/`scp` out over the same SSH session. **Ctrl+D** immediately disables Healer (see
+`healer-disable` below) — if you're watching this screen because Healer looks like it's thrashing, a
+keystroke here beats opening another shell. There's no re-enable key here on purpose — re-enabling is
+a considered action, done via `healer-enable`.
+
+The top "Server / config" box (server name, dry-run/live mode, poll interval, notification level,
+config path, and the "⚠ HEALER IS DISABLED" banner when applicable) is always visible, separate from
+the log tail below it — so it can never scroll out of view the way a one-time startup log line would.
 
 Reads whichever config `HEALER_CONFIG_PATH` points at (default `/etc/healer/healer.json` — the same
 default the daemon uses), so it always reflects the same box the daemon is actually running on.
+
+### `healer-disable` / `healer-enable` — emergency kill switch
+
+```sh
+sudo healer-disable "web is crash-looping, investigating"
+sudo healer-enable
+```
+
+Immediately stops Healer from taking any further automatic action, without touching config, without
+restarting the daemon, and without losing detection — incidents are still detected and reported,
+every mutating action just gets skipped and recorded to history as "Disabled" instead. This is the
+manual half of Healer's emergency kill switch; Healer can also disable itself automatically if it
+ever takes far more mutating actions than should be possible under normal cooldown-gated operation
+(see `emergencyBreaker` below) — you'll get a Telegram alert explaining exactly what was thrashing if
+that happens.
+
+Both commands need root (they write into/read from Healer's config directory) and share one sentinel
+file, `<config-directory>/DISABLED` (normally `/etc/healer/DISABLED`) — whether a human or Healer
+itself disabled it, `healer-enable` is the one way back, and it always prints the recorded reason
+before clearing it, so nobody clears an emergency stop blind. There's deliberately no auto-resume.
 
 ### `healer` — the daemon itself
 
@@ -221,6 +248,16 @@ See `deploy/healer.config.sample.json` for a fully-populated example. Key sectio
   "notify every time." History (`healer-status`) is never affected — every run is still recorded
   there regardless of whether Telegram was notified. Set `enabled: false` to restore notifying on
   every single successful run, exactly as before this existed.
+- `emergencyBreaker` — `{ enabled: true, maxActionsInWindow: 15, windowMinutes: 15 }` by default. A
+  last-resort, engine-wide tripwire independent of `restartPolicy`'s per-container circuit breaker
+  and global cooldown: if Healer ever attempts more mutating actions than the configured limit within
+  the window, it writes the same disable sentinel `healer-disable`/`healer-enable` use, records a
+  history row, and sends one unconditional Telegram alert (bypasses `notificationLevel`) with a
+  breakdown of exactly which actions were thrashing. The default limit is deliberately set *above*
+  what `restartPolicy.globalActionCooldownSeconds`'s default (90s) should ever physically allow
+  (~10 actions/15min) — this should never fire under any legitimate operation, only when something is
+  bypassing Healer's own throttles. No auto-resume; `sudo healer-enable` is the only way back. Set
+  `enabled: false` to turn this off entirely.
 - `history` — SQLite history DB path, snapshot cadence, and the two-tier retention policy (15-day
   raw snapshots, 90-day action/incident history by default).
 - `logging` — Serilog rolling-file settings (directory, size/count caps).

@@ -25,6 +25,7 @@ public static class MessageFormatter
             ActionOutcomeStatus.Failed => "FAILED:",
             ActionOutcomeStatus.SkippedCircuitOpen => "Skipped (repeated failures, alert-only):",
             ActionOutcomeStatus.SkippedCooldown => "Skipped (cooldown):",
+            ActionOutcomeStatus.Disabled => "DISABLED: would have",
             _ => string.Empty,
         };
 
@@ -38,6 +39,30 @@ public static class MessageFormatter
         return message;
     }
 
+    /// <summary>
+    /// The one-time alert sent when Decision.EmergencyActionRateBreaker trips — deliberately answers
+    /// "what went wrong" concretely (a breakdown of which actions/targets were actually attempted in
+    /// the window), not just "something happened too often". The breakdown reuses DescribeAction so
+    /// the wording matches every other action-outcome message in this system.
+    /// </summary>
+    public static string FormatEmergencyStopAlert(
+        int actionsInWindow, int maxActionsInWindow, int windowMinutes, IReadOnlyList<RecentMutatingAction> recentActions)
+    {
+        var breakdown = recentActions
+            .GroupBy(a => (a.Type, a.Target))
+            .OrderByDescending(g => g.Count())
+            .Select(g => $"  {g.Count()}x {DescribeAction(new PlannedAction { Type = g.Key.Type, Target = g.Key.Target, Reason = "" })}");
+
+        return
+            "🛑 Healer has disabled itself automatically.\n\n" +
+            $"{actionsInWindow} actions in the last {windowMinutes} minutes (limit: {maxActionsInWindow}) — this should be " +
+            "impossible under normal cooldown-gated operation and likely means a bug is bypassing Healer's own safety " +
+            "throttles.\n\n" +
+            "Recent actions:\n" + string.Join('\n', breakdown) + "\n\n" +
+            "Healer will NOT take any further automatic action. Investigate (see healer-status's history for full " +
+            "detail), then run 'sudo healer-enable' to resume.";
+    }
+
     private static string DescribeAction(PlannedAction action) => action.Type switch
     {
         ActionType.ScheduledHostReboot => "reboot the host",
@@ -48,6 +73,7 @@ public static class MessageFormatter
         ActionType.CriticalThresholdRestart => $"restart {action.Target} (memory critical)",
         ActionType.PreemptiveWorstOffenderRestart => $"restart {action.Target} (pre-emptive, worst memory offender)",
         ActionType.HostPressureRelief => "relieve host pressure (prune stopped containers/dangling images, ensure swap)",
+        ActionType.EmergencyStopTripped => "disable itself (emergency stop)",
         _ => action.Target,
     };
 }

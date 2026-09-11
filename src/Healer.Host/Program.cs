@@ -3,6 +3,7 @@ using Healer.Core.Configuration;
 using Healer.Core.Engine;
 using Healer.Host.Config;
 using Healer.Host.Docker;
+using Healer.Host.EmergencyStop;
 using Healer.Host.History;
 using Healer.Host.HostActions;
 using Healer.Host.Metrics;
@@ -49,6 +50,11 @@ var stateStore = new JsonFileStateStore(config.StatePath);
 var historyStore = new SqliteHistoryStore(config.History.HistoryDbPath);
 var composeRestartExecutor = new DockerComposeRestartExecutor();
 
+// Path derived from configPath, exactly like deploy/healer-disable.sh/healer-enable.sh derive it
+// from HEALER_CONFIG_PATH — not independently configurable, so it can't drift from the shell scripts.
+var emergencyStopPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, "DISABLED");
+var emergencyStopSignal = new FileEmergencyStopSignal(emergencyStopPath);
+
 var botToken = Environment.GetEnvironmentVariable(config.Telegram.BotTokenEnvVar);
 var chatId = Environment.GetEnvironmentVariable(config.Telegram.ChatIdEnvVar);
 if (string.IsNullOrEmpty(botToken) || string.IsNullOrEmpty(chatId))
@@ -71,6 +77,7 @@ var engine = new HealingEngine(
     notifier,
     historyStore,
     composeRestartExecutor,
+    emergencyStopSignal,
     config,
     TimeProvider.System,
     onWarning: (message, ex) => Log.Warning(ex, "{Message}", message));
