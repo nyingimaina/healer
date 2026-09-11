@@ -27,6 +27,23 @@ public static class RebootScheduleOptions
         (4, "4:00 AM"),
     ];
 
+    /// <summary>Finds which preset a saved interval corresponds to (for re-selecting it when the
+    /// wizard re-runs on an already-configured box), falling back to the "Custom" sentinel entry for
+    /// any interval that doesn't match one of the presets exactly.</summary>
+    public static int ResolveIntervalPresetIndex(int days)
+    {
+        var index = Array.FindIndex(IntervalPresets, p => p.Days == days);
+        return index >= 0 ? index : IntervalPresets.Length - 1;
+    }
+
+    /// <summary>Same idea as <see cref="ResolveIntervalPresetIndex"/> for the hour-of-day presets,
+    /// falling back to the recommended 3 AM slot for an hour that isn't one of the presets.</summary>
+    public static int ResolveHourPresetIndex(int hour)
+    {
+        var index = Array.FindIndex(HourPresets, p => p.Hour == hour);
+        return index >= 0 ? index : 3;
+    }
+
     public const int MinCustomIntervalDays = 1;
     public const int MaxCustomIntervalDays = 365;
 

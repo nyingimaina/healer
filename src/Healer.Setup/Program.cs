@@ -44,6 +44,18 @@ if (Console.IsInputRedirected)
     return await RunUnattendedAsync(unattendedAnswers);
 }
 
+// Interactive path: if this box was already configured (a prior wizard run, or healer-setup being
+// re-run to change something), pre-fill the wizard from what's already on disk instead of forcing
+// everything to be retyped — see WizardAnswersLoader. Telegram secrets live only in healer.env, never
+// in healer.json itself, so both files are read.
+var existingConfig = await HealerInstaller.TryReadExistingConfigAsync(HealerInstaller.DefaultConfigPath, CancellationToken.None);
+if (existingConfig is not null)
+{
+    var existingBotToken = await HealerInstaller.TryReadEnvValueAsync(HealerInstaller.DefaultEnvPath, existingConfig.Telegram.BotTokenEnvVar, CancellationToken.None);
+    var existingChatId = await HealerInstaller.TryReadEnvValueAsync(HealerInstaller.DefaultEnvPath, existingConfig.Telegram.ChatIdEnvVar, CancellationToken.None);
+    WizardAnswersLoader.Populate(answers, existingConfig, existingBotToken, existingChatId);
+}
+
 async Task<int> RunUnattendedAsync(WizardAnswers unattendedAnswers)
 {
     Console.WriteLine($"No interactive terminal — configuring unattended as '{unattendedAnswers.ServerName}' (dry-run, Balanced profile).");
@@ -145,11 +157,12 @@ WizardStep BuildServerNameStep()
     };
 
     step.Add(new Label { X = 0, Y = 0, Text = "Server name:" });
-    var nameField = new TextField { X = 0, Y = 1, Width = 40, Text = Environment.MachineName };
+    var initialName = answers.ServerName.Length > 0 ? answers.ServerName : Environment.MachineName;
+    var nameField = new TextField { X = 0, Y = 1, Width = 40, Text = initialName };
     var hint = new Label { X = 0, Y = 2, Text = "" };
     step.Add(nameField, hint);
 
-    answers.ServerName = Environment.MachineName;
+    answers.ServerName = initialName;
     nameField.TextChanged += (_, _) =>
     {
         answers.ServerName = nameField.Text.ToString() ?? "";
@@ -190,13 +203,13 @@ WizardStep BuildTelegramStep(out TextField tokenField, out TextField chatIdField
     };
 
     step.Add(new Label { X = 0, Y = 0, Text = "Bot token (from @BotFather):" });
-    var localTokenField = new TextField { X = 0, Y = 1, Width = 50 };
+    var localTokenField = new TextField { X = 0, Y = 1, Width = 50, Text = answers.BotToken };
     step.Add(localTokenField);
     var tokenHint = new Label { X = 0, Y = 2, Text = "" };
     step.Add(tokenHint);
 
     step.Add(new Label { X = 0, Y = 4, Text = "Chat id (from @userinfobot):" });
-    var localChatIdField = new TextField { X = 0, Y = 5, Width = 30 };
+    var localChatIdField = new TextField { X = 0, Y = 5, Width = 30, Text = answers.ChatId };
     step.Add(localChatIdField);
     var chatIdHint = new Label { X = 0, Y = 6, Text = "" };
     step.Add(chatIdHint);
@@ -248,13 +261,13 @@ WizardStep BuildSafetyStep(out OptionSelector safety, out CheckBox dryRun, out O
         answers.SafetyProfile = profile;
     };
 
-    var localDryRun = new CheckBox { X = 0, Y = 8, Text = "Start in Dry-Run mode (recommended) — Healer will alert but not act yet", Value = CheckState.Checked };
+    var localDryRun = new CheckBox { X = 0, Y = 8, Text = "Start in Dry-Run mode (recommended) — Healer will alert but not act yet", Value = answers.DryRun ? CheckState.Checked : CheckState.UnChecked };
     step.Add(localDryRun);
     localDryRun.ValueChanging += (_, e) => answers.DryRun = e.NewValue == CheckState.Checked;
 
     step.Add(new Label { X = 0, Y = 10, Text = "How much should Healer message you on Telegram?" });
     var localNotify = new OptionSelector { X = 0, Y = 11, Labels = ["Problems only (recommended)", "Everything (verbose)"] };
-    localNotify.Value = 0;
+    localNotify.Value = answers.NotificationLevel == NotificationLevel.Everything ? 1 : 0;
     localNotify.ValueChanged += (_, _) => answers.NotificationLevel = localNotify.Value == 1 ? NotificationLevel.Everything : NotificationLevel.ProblemsOnly;
     step.Add(localNotify);
 
@@ -315,6 +328,25 @@ WizardStep BuildScheduleStep(out CheckBox hostRebootCheck, out OptionSelector in
     localInterval.ValueChanged += (_, _) => Recompute();
     localCustomDays.ValueChanged += (_, _) => Recompute();
     localHour.ValueChanged += (_, _) => Recompute();
+
+    // Pre-fill from a previously-saved schedule (see WizardAnswersLoader) rather than always
+    // starting from this step's plain defaults.
+    if (answers.HostReboot is { } existingHostSchedule)
+    {
+        var intervalIndex = RebootScheduleOptions.ResolveIntervalPresetIndex(existingHostSchedule.IntervalDays);
+        localInterval.Value = intervalIndex;
+        localCustomDays.Value = existingHostSchedule.IntervalDays;
+        localHour.Value = RebootScheduleOptions.ResolveHourPresetIndex(existingHostSchedule.Hour);
+
+        var isCustom = intervalIndex == RebootScheduleOptions.IntervalPresets.Length - 1;
+        customDaysLabel.Visible = isCustom;
+        localCustomDays.Visible = isCustom;
+    }
+
+    if (answers.HostRebootEnabled)
+    {
+        localEnable.Value = CheckState.Checked;
+    }
 
     hostRebootCheck = localEnable;
     intervalSelector = localInterval;
@@ -494,6 +526,40 @@ WizardStep BuildComposeRestartStep()
     // Terminal.Gui version — GetAllMarkedItems() is read on demand instead, right before this step
     // is left (see OnMovingNext), which is the only point the marks actually need to be current by.
     composeRecompute = Recompute;
+
+    // Pre-fill from a previously-saved schedule (see WizardAnswersLoader). The manual fields are the
+    // best we can do here for the SAVED project itself — if it's still running, it'll also show up
+    // in the auto-discovered checklist above, but re-marking it there automatically isn't attempted;
+    // pressing Space once on it is a small ask next to retyping everything else.
+    if (nameField.Text.ToString()?.Length is 0 or null && directoryField.Text.ToString()?.Length is 0 or null)
+    {
+        if (answers.ManualComposeProjectName.Length > 0)
+        {
+            nameField.Text = answers.ManualComposeProjectName;
+        }
+
+        if (answers.ManualComposeWorkingDirectory.Length > 0)
+        {
+            directoryField.Text = answers.ManualComposeWorkingDirectory;
+        }
+    }
+
+    if (answers.ComposeRestartSchedule is { } existingComposeSchedule)
+    {
+        var intervalIndex = RebootScheduleOptions.ResolveIntervalPresetIndex(existingComposeSchedule.IntervalDays);
+        localInterval.Value = intervalIndex;
+        localCustomDays.Value = existingComposeSchedule.IntervalDays;
+        localHour.Value = RebootScheduleOptions.ResolveHourPresetIndex(existingComposeSchedule.Hour);
+
+        var isCustom = intervalIndex == RebootScheduleOptions.IntervalPresets.Length - 1;
+        customDaysLabel.Visible = isCustom;
+        localCustomDays.Visible = isCustom;
+    }
+
+    if (answers.ComposeRestartEnabled)
+    {
+        localEnable.Value = CheckState.Checked;
+    }
 
     return step;
 }

@@ -50,4 +50,37 @@ public class RebootScheduleOptionsTests
         Assert.Equal(-1, last.Days);
         Assert.Contains("Custom", last.Label);
     }
+
+    [Theory]
+    [InlineData(1, 0)]  // Daily
+    [InlineData(7, 1)]  // Weekly
+    [InlineData(14, 2)] // Every 2 weeks
+    [InlineData(30, 3)] // Monthly
+    public void ResolveIntervalPresetIndex_MatchesAnExactPreset(int days, int expectedIndex)
+    {
+        Assert.Equal(expectedIndex, RebootScheduleOptions.ResolveIntervalPresetIndex(days));
+    }
+
+    [Fact]
+    public void ResolveIntervalPresetIndex_FallsBackToCustomForAnUnmatchedInterval()
+    {
+        var index = RebootScheduleOptions.ResolveIntervalPresetIndex(10);
+
+        Assert.Equal(RebootScheduleOptions.IntervalPresets.Length - 1, index);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(3, 3)]
+    [InlineData(4, 4)]
+    public void ResolveHourPresetIndex_MatchesAnExactPreset(int hour, int expectedIndex)
+    {
+        Assert.Equal(expectedIndex, RebootScheduleOptions.ResolveHourPresetIndex(hour));
+    }
+
+    [Fact]
+    public void ResolveHourPresetIndex_FallsBackToTheRecommendedDefaultForAnUnmatchedHour()
+    {
+        Assert.Equal(3, RebootScheduleOptions.ResolveHourPresetIndex(17));
+    }
 }

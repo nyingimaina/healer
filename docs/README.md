@@ -74,8 +74,18 @@ short while after you reconnect, not in the wizard.
 
 ## Re-running the wizard
 
-`healer-setup` detects an existing config and offers "Edit existing configuration" or "Start
-fresh". Advanced numeric tuning (exact thresholds, retention days, poll intervals) isn't exposed in
+`healer-setup` detects an existing `/etc/healer/healer.json` (+ the Telegram secrets in
+`/etc/healer/healer.env`) and pre-fills every screen from it — server name, Telegram bot
+token/chat id, dry-run/notification settings, and any scheduled reboot/compose-restart windows —
+so reconfiguring one thing doesn't mean retyping everything else. Just change whatever field(s) you
+want and step through; there's no separate "edit vs. start fresh" choice to make. To genuinely start
+fresh, delete `/etc/healer/healer.json` first, or just overwrite each field by hand as you go through.
+
+One exception: the Safety profile selector always starts back at "Balanced (recommended)" — the
+profile itself isn't saved anywhere, only the individual settings it derives, so there's no way to
+reconstruct which one was originally picked.
+
+Advanced numeric tuning (exact thresholds, retention days, poll intervals) isn't exposed in
 the wizard at all — it's fully determined by the safety profile you pick. To fine-tune a specific
 number, edit `/etc/healer/healer.json` directly; see the field reference below.
 
@@ -94,9 +104,9 @@ sudo healer-setup
 ```
 
 Needs root (it writes `/etc/healer/`, installs the systemd unit, and its preflight check verifies
-it's running as root). Run it again any time to change settings — it detects the existing config and
-offers **"Edit existing configuration"** or **"Start fresh"** as a menu choice, never a typed
-decision.
+it's running as root). Run it again any time to change settings — every screen pre-fills from the
+existing config (see "Re-running the wizard" above), so you only need to change what you're
+actually reconfiguring.
 
 Unattended (no interactive terminal — EC2 User Data, a golden AMI bake): set these environment
 variables first, then run it. It always starts in dry-run with the Balanced profile regardless of

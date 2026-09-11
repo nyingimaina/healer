@@ -25,6 +25,43 @@ public static class HealerInstaller
     public const string DefaultEnvPath = "/etc/healer/healer.env";
     public const string SystemdUnitDestination = "/etc/systemd/system/healer.service";
 
+    /// <summary>Returns the previously-saved config so the wizard can pre-fill itself on a box that
+    /// was already set up, or null if this box has never been configured. Uses Healer.Host's own
+    /// source-generated loader so parsing is guaranteed identical to what the daemon itself reads.</summary>
+    public static async Task<HealerConfig?> TryReadExistingConfigAsync(string path, CancellationToken ct)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await Healer.Host.Config.HealerConfigLoader.LoadAsync(path, ct);
+        }
+        catch (Exception)
+        {
+            // A corrupt or hand-edited-into-invalidity config file shouldn't block re-running the
+            // wizard — it just falls back to defaults, same as a box with no saved config at all.
+            return null;
+        }
+    }
+
+    /// <summary>Recovers one secret value (bot token/chat id) from the env file written by
+    /// <see cref="WriteEnvFileAsync"/>, keyed by the same env var name recorded in the saved config's
+    /// TelegramConfig — the wizard has no other way to show these back, since they never appear in
+    /// healer.json itself.</summary>
+    public static async Task<string?> TryReadEnvValueAsync(string path, string key, CancellationToken ct)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var content = await File.ReadAllTextAsync(path, ct);
+        return EnvFileParser.TryGetValue(content, key);
+    }
+
     public static async Task WriteConfigAsync(HealerConfig config, string path, CancellationToken ct)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
