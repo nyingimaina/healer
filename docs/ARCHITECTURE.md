@@ -345,6 +345,25 @@ happens to resolve a pre-existing, previously-accepted Debian Policy §9.1.2 dev
 aren't supposed to install into `/usr/local` at all, which is reserved for the sysadmin's own,
 non-package-managed installs) as a side effect of fixing the real bug.
 
+**A fifth real bug, found the same way: sharing ONE extraction directory across different users
+doesn't actually work.** A real box hit `Failed to create directory
+[/opt/healer/.extract/healer-setup.bin/<n>] ... Error code: 13` (`EACCES`) the second time
+`healer-setup` ran as a different user than the first. `.extract/` itself is `1777`
+(world-writable + sticky), so any user can create a new entry directly under it — but .NET's
+single-file bundle extractor then creates an *intermediate* directory
+(`.extract/healer-setup.bin/`) that inherits the creating process's normal umask, not `1777`.
+Whichever user runs first "claims" that intermediate directory (root, via `postinst`, typically
+mode `755`) — every other user afterward can't write new entries inside it. Sharing one extraction
+tree across users was exactly the unsafe assumption .NET's own *default* behavior (leaving
+`DOTNET_BUNDLE_EXTRACT_BASE_DIR` unset, which keys off `$HOME`/uid) avoids; overriding it with one
+fixed path for everyone reintroduced the exact problem that default sidesteps. Fixed by keying the
+extraction path itself by uid — `DOTNET_BUNDLE_EXTRACT_BASE_DIR="/opt/healer/.extract/$(id -u)"` —
+so each user gets a subtree it creates (and therefore owns) itself the first time it runs, with no
+cross-user collision possible. A box that already hit this doesn't need manual cleanup: the new
+per-uid path has never existed before for that uid, so it's created fresh regardless of whatever
+stale, wrong-permission directories are still sitting under the old shared path (`sudo rm -rf
+/opt/healer/.extract/*` afterward is optional hygiene, not required).
+
 ## Scheduled docker-compose restarts
 
 A second, independent scheduling mechanism alongside scheduled host/container reboots

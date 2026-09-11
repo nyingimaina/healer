@@ -86,8 +86,18 @@ cp "$PUBLISH_DIR/setup/healer-setup" "$OUTPUT_DIR/healer-setup.bin"
 cp "$PUBLISH_DIR/status/healer-status" "$OUTPUT_DIR/healer-status.bin"
 chmod 755 "$OUTPUT_DIR/healer-setup.bin" "$OUTPUT_DIR/healer-status.bin"
 
+# PER-UID subdirectory, NOT a single shared path for everyone — confirmed BY ACTUALLY RUNNING A
+# BUILT PACKAGE a second time as a different user: "Failed to create directory
+# [/opt/healer/.extract/healer-setup.bin/<n>] ... Error code: 13" (EACCES). .extract/ itself is
+# 1777, so anyone can create a new entry directly under it, but .NET's bundle extractor then creates
+# an intermediate directory (.extract/healer-setup.bin/) that inherits the CREATING process's normal
+# umask (not 1777) — whichever user runs first "claims" that intermediate directory (e.g. root via
+# postinst, mode 755), and any DIFFERENT user afterward can't write new entries inside it. Sharing
+# one extraction tree across users was exactly the unsafe assumption .NET's OWN default (unset
+# DOTNET_BUNDLE_EXTRACT_BASE_DIR) avoids by keying off $HOME/uid — giving each uid its own subtree
+# here restores that same per-user isolation instead of fighting it.
 for name in healer-setup healer-status; do
-    printf '#!/bin/sh\nexport DOTNET_BUNDLE_EXTRACT_BASE_DIR="/opt/healer/.extract"\nexec "/opt/healer/%s.bin" "$@"\n' "$name" >"$OUTPUT_DIR/$name"
+    printf '#!/bin/sh\nexport DOTNET_BUNDLE_EXTRACT_BASE_DIR="/opt/healer/.extract/$(id -u)"\nexec "/opt/healer/%s.bin" "$@"\n' "$name" >"$OUTPUT_DIR/$name"
     chmod 755 "$OUTPUT_DIR/$name"
 done
 
