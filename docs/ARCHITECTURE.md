@@ -115,6 +115,20 @@ them — a single genuinely-running unlimited container still got an artificiall
 instead of 80%) because 2-3 long-stopped containers with no `mem_limit` were counted as if they were
 also competing for memory. Fixed by only counting `IsRunning` containers toward the fair share.
 
+**A second, more consequential bug found chasing the same field report**: `HealerInstaller.
+InstallAndStartServiceAsync` — called by every `healer-setup` Apply, both fresh-install and
+re-run — used `systemctl enable --now healer`. `--now` is `start`, and `start` is a NO-OP on a unit
+that's already active. Re-running `healer-setup` (or `bootstrap.sh`'s one-liner, which re-extracts
+the tarball THEN launches `healer-setup`) on a box where `healer` was already running would correctly
+overwrite the on-disk binary and config, but never actually restart the already-running daemon
+process — it kept executing the OLD code in memory indefinitely, with nothing left to tell it to
+reload. This is a strong candidate for why a box can look "installed" with a current build on disk
+while still visibly running old behavior. Fixed by using `enable` + an unconditional `restart`
+instead (`restart` starts a not-yet-running unit exactly like `start` would, and actually reloads an
+already-running one) — the `.deb` package's own `postinst` already got this right independently via
+`systemctl try-restart` on upgrade, so this specifically only affected the `healer-setup`/
+`bootstrap.sh` re-run path.
+
 ## Telegram noise control
 
 Every notification passes through `HealingEngine.ShouldSendToTelegram`, which — under the default

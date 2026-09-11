@@ -85,7 +85,16 @@ public static class HealerInstaller
     {
         File.Copy(unitSourcePath, SystemdUnitDestination, overwrite: true);
         await RunAsync("systemctl", "daemon-reload", ct);
-        await RunAsync("systemctl", "enable --now healer", ct);
+        await RunAsync("systemctl", "enable healer", ct);
+
+        // NOT "enable --now" (equivalent to `start`): `start` is a no-op on a unit that's ALREADY
+        // active, so re-running healer-setup (a real path — bootstrap.sh's one-liner re-run, or a
+        // human upgrading in place) would leave the box's on-disk binary correctly upgraded while the
+        // ALREADY-RUNNING daemon process kept executing the OLD code in memory indefinitely, with
+        // nothing here ever telling it to reload. `restart` always makes the running process match
+        // whatever's on disk right now — starting it fresh on a first install (same effect as
+        // `start` there), or actually reloading it on every subsequent Apply.
+        await RunAsync("systemctl", "restart healer", ct);
     }
 
     public static async Task<bool> IsServiceActiveAsync(CancellationToken ct)
