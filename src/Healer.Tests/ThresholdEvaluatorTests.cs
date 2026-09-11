@@ -27,11 +27,11 @@ public class ThresholdEvaluatorTests
     private static ContainerInfo MakeContainer(
         string name = "app", long memUsed = 0, long? memLimit = null,
         ContainerHealthStatus health = ContainerHealthStatus.Healthy, TimeSpan? unhealthyFor = null,
-        int restartCount = 0) => new()
+        int restartCount = 0, bool isRunning = true) => new()
     {
         Name = name,
         Id = name + "-id",
-        IsRunning = true,
+        IsRunning = isRunning,
         HealthStatus = health,
         UnhealthyFor = unhealthyFor,
         RestartCount = restartCount,
@@ -94,6 +94,23 @@ public class ThresholdEvaluatorTests
 
         var incident = Assert.Single(incidents, i => i.Target == "app");
         Assert.Equal(IncidentSeverity.Critical, incident.Severity);
+    }
+
+    [Fact]
+    public void ContainerWithNoMemLimit_StoppedContainersDoNotCountTowardTheFairShare()
+    {
+        // Real bug: Healer lists containers with all=true (stopped ones included, unlike `docker ps`
+        // without -a), and the fair share was originally computed over ALL of them - a box with old
+        // exited containers lying around got an artificially LOW ceiling for the one container
+        // actually running and consuming memory, even though a stopped container uses none.
+        var host = MakeHost(totalMemBytes: 1000);
+        var running = MakeContainer(name: "app", memUsed: 300, memLimit: null, isRunning: true); // 30% of host
+        var stoppedOne = MakeContainer(name: "old1", memLimit: null, isRunning: false);
+        var stoppedTwo = MakeContainer(name: "old2", memLimit: null, isRunning: false);
+
+        var incidents = ThresholdEvaluator.Evaluate(host, [running, stoppedOne, stoppedTwo], Thresholds, [], NoPreviousCounts);
+
+        Assert.DoesNotContain(incidents, i => i.Target == "app");
     }
 
     [Fact]

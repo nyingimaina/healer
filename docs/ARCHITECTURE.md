@@ -108,6 +108,13 @@ Containers *with* an explicit `mem_limit` are completely untouched by this — t
 operator's own stated intent from the compose file, and `ContainerMemoryCriticalPercentOfLimit` (or a
 per-container override via `ContainerOverrides`) still governs those exactly as before.
 
+**A bug in the first version of this fix, found immediately in the field**: `DockerSocketHttpClient`
+lists containers with `all=true` (stopped/exited ones included, unlike plain `docker ps`), so a box
+with old stopped containers lying around from past redeploys got its fair share computed over ALL of
+them — a single genuinely-running unlimited container still got an artificially low ceiling (e.g. 27%
+instead of 80%) because 2-3 long-stopped containers with no `mem_limit` were counted as if they were
+also competing for memory. Fixed by only counting `IsRunning` containers toward the fair share.
+
 ## Telegram noise control
 
 Every notification passes through `HealingEngine.ShouldSendToTelegram`, which — under the default
