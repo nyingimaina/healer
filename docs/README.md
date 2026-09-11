@@ -212,6 +212,15 @@ See `deploy/healer.config.sample.json` for a fully-populated example. Key sectio
   startup ordering itself, all at once — Healer doesn't stagger this one the way it staggers
   individual container restarts). Same interval/hour schedule shape as `scheduledReboots.host`; a
   container can be exempted from this refresh via `containerOverrides[].excludeFromPeriodicComposeRestart`.
+- `scheduledSuccessBackoff` — `{ enabled: true, maxSkip: 16 }` by default. A nightly (or weekly)
+  scheduled reboot/compose-restart that always succeeds would otherwise send an identical "it
+  worked" Telegram message every single time forever — exactly the kind of noise that trains people
+  to stop reading the channel, which is when the rare real failure gets missed. With this on,
+  successful runs notify less and less often (capped, doubling: notifies on run 1, 3, 6, 11, 20, 37,
+  then every 17th run once it settles) — and the very first failure resets it straight back to
+  "notify every time." History (`healer-status`) is never affected — every run is still recorded
+  there regardless of whether Telegram was notified. Set `enabled: false` to restore notifying on
+  every single successful run, exactly as before this existed.
 - `history` — SQLite history DB path, snapshot cadence, and the two-tier retention policy (15-day
   raw snapshots, 90-day action/incident history by default).
 - `logging` — Serilog rolling-file settings (directory, size/count caps).

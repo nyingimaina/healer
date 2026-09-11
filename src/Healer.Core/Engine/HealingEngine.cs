@@ -179,7 +179,7 @@ public sealed class HealingEngine
             if (containerState.CircuitState == CircuitState.Open)
             {
                 var skipped = new ActionOutcome { Action = candidate, Status = ActionOutcomeStatus.SkippedCircuitOpen, TimestampUtc = now };
-                await NotifyAndRecordAsync(skipped, ct);
+                await NotifyAndRecordAsync(skipped, state, ct);
                 continue;
             }
 
@@ -199,7 +199,7 @@ public sealed class HealingEngine
         if (_config.DryRun)
         {
             var dryRunOutcome = new ActionOutcome { Action = action, Status = ActionOutcomeStatus.DryRun, TimestampUtc = now };
-            await NotifyAndRecordAsync(dryRunOutcome, ct);
+            await NotifyAndRecordAsync(dryRunOutcome, state, ct);
             return;
         }
 
@@ -216,14 +216,14 @@ public sealed class HealingEngine
             await _stateStore.SaveAsync(state, ct);
 
             var rebootOutcome = new ActionOutcome { Action = action, Status = ActionOutcomeStatus.Success, TimestampUtc = now };
-            await NotifyAndRecordAsync(rebootOutcome, ct);
+            await NotifyAndRecordAsync(rebootOutcome, state, ct);
 
             await _hostSystemActions.RebootHostAsync(ct);
             return;
         }
 
         var outcome = await ExecuteLiveActionAsync(action, state, now, ct);
-        await NotifyAndRecordAsync(outcome, ct);
+        await NotifyAndRecordAsync(outcome, state, ct);
     }
 
     private async Task<ActionOutcome> ExecuteLiveActionAsync(PlannedAction action, HealerState state, DateTimeOffset now, CancellationToken ct)
@@ -324,7 +324,7 @@ public sealed class HealingEngine
                 TimestampUtc = now,
                 Detail = isHealthy ? null : "still unhealthy after restart",
             };
-            await NotifyAndRecordAsync(verification, ct);
+            await NotifyAndRecordAsync(verification, state, ct);
         }
     }
 
@@ -347,7 +347,7 @@ public sealed class HealingEngine
                 Detail = "host boot time never advanced past the request within the grace window — the host may not have rebooted, or Healer didn't come back",
             };
 
-        await NotifyAndRecordAsync(outcome, ct);
+        await NotifyAndRecordAsync(outcome, state, ct);
 
         state.PendingRebootRequestedUtc = null;
         state.PendingRebootReason = null;
@@ -392,11 +392,23 @@ public sealed class HealingEngine
         }
     }
 
-    private async Task NotifyAndRecordAsync(ActionOutcome outcome, CancellationToken ct)
+    /// <summary>Scheduled/planned action types eligible for the capped-exponential-backoff success
+    /// notification throttle — see <see cref="ScheduledSuccessNotificationGate"/>. Reactive types
+    /// (crash-loop, worst-offender, etc.) are never in this list; their successes already stay
+    /// silent under ProblemsOnly regardless, unaffected by this feature.</summary>
+    private static readonly ActionType[] ScheduledActionTypesEligibleForSuccessBackoff =
+    [
+        ActionType.ScheduledHostReboot,
+        ActionType.ScheduledContainerReboot,
+        ActionType.ScheduledComposeRestart,
+        ActionType.HostRebootVerification,
+    ];
+
+    private async Task NotifyAndRecordAsync(ActionOutcome outcome, HealerState state, CancellationToken ct)
     {
         // History always gets everything, unaffected by the Telegram noise preference — it's the
         // durable audit trail (browsable via Healer.Status), separate from what interrupts a phone.
-        if (ShouldSendToTelegram(outcome, _config.NotificationLevel))
+        if (ShouldSendToTelegram(outcome, state))
         {
             var message = MessageFormatter.FormatActionOutcome(outcome);
             await _notifier.SendAsync(MessageFormatter.WithServerPrefix(_config.ServerName, message), ct);
@@ -412,11 +424,29 @@ public sealed class HealingEngine
         }
     }
 
-    private static bool ShouldSendToTelegram(ActionOutcome outcome, NotificationLevel level)
+    private bool ShouldSendToTelegram(ActionOutcome outcome, HealerState state)
     {
-        if (level == NotificationLevel.Everything)
+        if (_config.NotificationLevel == NotificationLevel.Everything)
         {
             return true;
+        }
+
+        var isEligibleForBackoff = ScheduledActionTypesEligibleForSuccessBackoff.Contains(outcome.Action.Type);
+
+        if (isEligibleForBackoff && outcome.Status == ActionOutcomeStatus.Success && _config.ScheduledSuccessBackoff.Enabled)
+        {
+            return EvaluateScheduledSuccessBackoff(outcome.Action, state);
+        }
+
+        if (isEligibleForBackoff && outcome.Status != ActionOutcomeStatus.Success)
+        {
+            // Any non-success outcome for one of these types (Failed, SkippedCircuitOpen, DryRun) —
+            // "the first error message" — resets the backoff so the run right after a real problem
+            // notifies immediately, at full frequency, not still-possibly-suppressed. Deliberately
+            // does NOT change the notify decision itself, which still goes through the untouched
+            // switch below — only whether this key's streak survives.
+            var key = BackoffKey(outcome.Action);
+            state.ScheduledSuccessNotify.Remove(key);
         }
 
         // ProblemsOnly: always surface actual problems and disruptive planned events; stay quiet
@@ -427,10 +457,29 @@ public sealed class HealingEngine
             ActionOutcomeStatus.Failed => true,
             ActionOutcomeStatus.SkippedCircuitOpen => true,
             ActionOutcomeStatus.DryRun => true,
-            ActionOutcomeStatus.Success => outcome.Action.Type is ActionType.ScheduledHostReboot or ActionType.ScheduledContainerReboot or ActionType.ScheduledComposeRestart or ActionType.HostRebootVerification,
+            ActionOutcomeStatus.Success when isEligibleForBackoff => true, // backoff disabled (checked above) — old always-notify behavior
             _ => false,
         };
     }
+
+    private bool EvaluateScheduledSuccessBackoff(PlannedAction action, HealerState state)
+    {
+        var key = BackoffKey(action);
+        var current = state.ScheduledSuccessNotify.TryGetValue(key, out var existing) ? existing : new ScheduledActionNotifyState();
+
+        var (shouldNotify, successesSinceLastNotify, skipThreshold) = ScheduledSuccessNotificationGate.Evaluate(
+            current.SuccessesSinceLastNotify, current.SkipThreshold, _config.ScheduledSuccessBackoff.MaxSkip);
+
+        state.ScheduledSuccessNotify[key] = new ScheduledActionNotifyState
+        {
+            SuccessesSinceLastNotify = successesSinceLastNotify,
+            SkipThreshold = skipThreshold,
+        };
+
+        return shouldNotify;
+    }
+
+    private static string BackoffKey(PlannedAction action) => $"{action.Type}:{action.Target}";
 
     private static bool TargetsAContainer(ActionType type) => type is
         ActionType.ScheduledContainerReboot or

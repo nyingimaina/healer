@@ -63,6 +63,11 @@
     "projects": []
   },
 
+  "scheduledSuccessBackoff": {
+    "enabled": true,
+    "maxSkip": 16
+  },
+
   "containerOverrides": [],
 
   "history": {

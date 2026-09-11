@@ -32,6 +32,15 @@ public sealed class ContainerRuntimeState
     public int? LastObservedRestartCount { get; set; }
 }
 
+/// <summary>Capped-exponential-backoff notification throttle state for one scheduled action (keyed
+/// by "ActionType:Target" in <see cref="HealerState.ScheduledSuccessNotify"/>) — see
+/// <see cref="Decision.ScheduledSuccessNotificationGate"/>.</summary>
+public sealed class ScheduledActionNotifyState
+{
+    public int SuccessesSinceLastNotify { get; set; }
+    public int SkipThreshold { get; set; }
+}
+
 /// <summary>The full persisted state of the healing engine, surviving daemon restarts via <see cref="Abstractions.IStateStore"/>.</summary>
 public sealed class HealerState
 {
@@ -60,6 +69,9 @@ public sealed class HealerState
 
     /// <summary>Consecutive ticks host memory has been at/above the critical threshold — gates pre-emptive worst-offender selection so a single spike doesn't trigger it.</summary>
     public int HostMemoryCriticalStreak { get; set; }
+
+    /// <summary>Per scheduled action, keyed "ActionType:Target" (e.g. "ScheduledComposeRestart:milele") — see <see cref="Decision.ScheduledSuccessNotificationGate"/>.</summary>
+    public Dictionary<string, ScheduledActionNotifyState> ScheduledSuccessNotify { get; set; } = [];
 
     public ContainerRuntimeState GetOrAddContainer(string name)
     {

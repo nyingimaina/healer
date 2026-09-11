@@ -48,6 +48,10 @@ public class HealerJsonRoundTripTests
         Assert.NotNull(config.ScheduledComposeRestarts);
         Assert.Empty(config.ScheduledComposeRestarts.Projects);
 
+        Assert.NotNull(config.ScheduledSuccessBackoff);
+        Assert.True(config.ScheduledSuccessBackoff.Enabled);
+        Assert.Equal(16, config.ScheduledSuccessBackoff.MaxSkip); // NOT 0 — this is the exact bug this test guards against
+
         Assert.NotNull(config.History);
         Assert.Equal(15, config.History.ResourceSnapshotRetentionDays);
         Assert.Equal(90, config.History.ActionHistoryRetentionDays);
@@ -114,6 +118,15 @@ public class HealerJsonRoundTripTests
         Assert.True(project.Schedule.Enabled);
         Assert.Equal(7, project.Schedule.IntervalDays);
         Assert.Equal(0, project.Schedule.Minute); // NOT overridden — must still be the default
+    }
+
+    [Fact]
+    public void PartiallySpecifiedScheduledSuccessBackoff_KeepsUnspecifiedFieldsAtTheirDefaults()
+    {
+        var config = Deserialize("""{"serverName":"x","scheduledSuccessBackoff":{"maxSkip":4}}""");
+
+        Assert.Equal(4, config.ScheduledSuccessBackoff.MaxSkip); // explicitly overridden
+        Assert.True(config.ScheduledSuccessBackoff.Enabled); // NOT overridden — must still be the default
     }
 
     [Fact]

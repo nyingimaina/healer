@@ -353,6 +353,117 @@ public class HealingEngineTests
         Assert.Contains(h.HistoryStore.ActionRecords, a => a.Action.Type == ActionType.ScheduledComposeRestart && a.Action.Target == "milele" && a.Status == ActionOutcomeStatus.Success);
     }
 
+    private static HealerConfig NightlyComposeRestartConfig(bool backoffEnabled = true) => new()
+    {
+        ServerName = "test-server",
+        DryRun = false,
+        NotificationLevel = NotificationLevel.ProblemsOnly,
+        ScheduledSuccessBackoff = new ScheduledSuccessBackoffConfig { Enabled = backoffEnabled },
+        ScheduledComposeRestarts = new ScheduledComposeRestartsConfig
+        {
+            Projects =
+            [
+                new ComposeProjectSchedule
+                {
+                    ProjectName = "milele",
+                    WorkingDirectory = "/opt/milele",
+                    Schedule = new RebootSchedule { Enabled = true, IntervalDays = 1, AnchorDate = DateOnly.FromDateTime(T0.UtcDateTime), Hour = 0, Minute = 0, TimeZoneId = "UTC" },
+                },
+            ],
+        },
+    };
+
+    private static int CountComposeRestartNotifications(Harness h) =>
+        h.Notifier.SentMessages.Count(m => m.Contains("milele") && m.Contains("compose"));
+
+    [Fact]
+    public async Task Live_NightlyComposeRestart_TelegramNotificationsFollowTheDoublingBackoffSchedule_ButHistoryRecordsEveryNight()
+    {
+        var h = new Harness { Config = NightlyComposeRestartConfig() };
+
+        // Matches the worked example from the design discussion exactly: 6 consecutive successful
+        // nights should notify on nights 1, 3, and 6 — 3 notifications, not 6.
+        for (var night = 0; night < 6; night++)
+        {
+            await h.Tick();
+            h.TimeProvider.Advance(TimeSpan.FromDays(1));
+        }
+
+        Assert.Equal(3, CountComposeRestartNotifications(h));
+        Assert.Equal(6, h.HistoryStore.ActionRecords.Count(a => a.Action.Type == ActionType.ScheduledComposeRestart && a.Status == ActionOutcomeStatus.Success));
+    }
+
+    [Fact]
+    public async Task Live_NightlyComposeRestart_ReachesTheCappedSteadyState_NotifyingEvery17thNightThereafter()
+    {
+        var h = new Harness { Config = NightlyComposeRestartConfig() };
+
+        for (var night = 0; night < 54; night++)
+        {
+            await h.Tick();
+            h.TimeProvider.Advance(TimeSpan.FromDays(1));
+        }
+
+        // Per the design's worked example: nights 1, 3, 6, 11, 20, 37, 54 notify — 7 total.
+        Assert.Equal(7, CountComposeRestartNotifications(h));
+    }
+
+    [Fact]
+    public async Task Live_NightlyComposeRestart_AFailureImmediatelyResetsTheBackoff()
+    {
+        var h = new Harness { Config = NightlyComposeRestartConfig() };
+
+        // Build up a suppressed streak: night 1 notifies, night 2 is suppressed.
+        await h.Tick();
+        h.TimeProvider.Advance(TimeSpan.FromDays(1));
+        await h.Tick();
+        h.TimeProvider.Advance(TimeSpan.FromDays(1));
+        Assert.Equal(1, CountComposeRestartNotifications(h));
+
+        // Night 3 fails outright — failures always notify regardless of backoff state.
+        h.ComposeRestartExecutor.ThrowOnRestart = new InvalidOperationException("docker compose down");
+        await h.Tick();
+        h.TimeProvider.Advance(TimeSpan.FromDays(1));
+        Assert.Contains(h.Notifier.SentMessages, m => m.Contains("FAILED") && m.Contains("milele"));
+
+        // Night 4 succeeds again — this must notify immediately (streak reset to "day 1"), not
+        // still be suppressed as if night 3's failure had never happened.
+        h.ComposeRestartExecutor.ThrowOnRestart = null;
+        var notificationsBeforeNight4 = CountComposeRestartNotifications(h);
+        await h.Tick();
+
+        Assert.True(CountComposeRestartNotifications(h) > notificationsBeforeNight4, "the first success after a failure must notify immediately");
+    }
+
+    [Fact]
+    public async Task Live_NightlyComposeRestart_BackoffDisabled_NotifiesEveryNightLikeBefore()
+    {
+        var h = new Harness { Config = NightlyComposeRestartConfig(backoffEnabled: false) };
+
+        for (var night = 0; night < 6; night++)
+        {
+            await h.Tick();
+            h.TimeProvider.Advance(TimeSpan.FromDays(1));
+        }
+
+        Assert.Equal(6, CountComposeRestartNotifications(h));
+    }
+
+    [Fact]
+    public async Task Live_NightlyComposeRestart_NotificationLevelEverything_BypassesTheBackoffEntirely()
+    {
+        var config = NightlyComposeRestartConfig() with { NotificationLevel = NotificationLevel.Everything };
+        var h = new Harness { Config = config };
+
+        for (var night = 0; night < 6; night++)
+        {
+            await h.Tick();
+            h.TimeProvider.Advance(TimeSpan.FromDays(1));
+        }
+
+        Assert.Equal(6, CountComposeRestartNotifications(h));
+    }
+
     [Fact]
     public async Task Live_ScheduledComposeRestart_PassesExcludedContainersFromOverrides()
     {

@@ -102,6 +102,16 @@ public sealed record LoggingConfig(
     int RetainedFileCount = 7,
     string MinimumLevel = "Information");
 
+/// <summary>
+/// Capped exponential backoff on repeated-SUCCESS Telegram notifications for scheduled host reboots
+/// and compose restarts — see <see cref="Decision.ScheduledSuccessNotificationGate"/>. Set
+/// <see cref="Enabled"/> to false to restore the old "always notify on every successful scheduled
+/// run" behavior exactly.
+/// </summary>
+public sealed record ScheduledSuccessBackoffConfig(
+    bool Enabled = true,
+    int MaxSkip = 16);
+
 public sealed record ScheduledRebootsConfig(
     RebootSchedule? Host = null,
     IReadOnlyList<ContainerSchedule>? Containers = null)
@@ -123,6 +133,7 @@ public sealed record HealerConfig(
     HostPressureReliefConfig? HostPressureRelief = null,
     ScheduledRebootsConfig? ScheduledReboots = null,
     ScheduledComposeRestartsConfig? ScheduledComposeRestarts = null,
+    ScheduledSuccessBackoffConfig? ScheduledSuccessBackoff = null,
     IReadOnlyList<ContainerOverrideConfig>? ContainerOverrides = null,
     HistoryConfig? History = null,
     LoggingConfig? Logging = null)
@@ -140,6 +151,7 @@ public sealed record HealerConfig(
     public HostPressureReliefConfig HostPressureRelief { get; init; } = HostPressureRelief ?? new();
     public ScheduledRebootsConfig ScheduledReboots { get; init; } = ScheduledReboots ?? new();
     public ScheduledComposeRestartsConfig ScheduledComposeRestarts { get; init; } = ScheduledComposeRestarts ?? new();
+    public ScheduledSuccessBackoffConfig ScheduledSuccessBackoff { get; init; } = ScheduledSuccessBackoff ?? new();
     public IReadOnlyList<ContainerOverrideConfig> ContainerOverrides { get; init; } = ContainerOverrides ?? [];
     public HistoryConfig History { get; init; } = History ?? new();
     public LoggingConfig Logging { get; init; } = Logging ?? new();

@@ -41,6 +41,50 @@ all. Routine successes are still recorded to the SQLite history and visible in `
 this only controls what interrupts your phone. Every message is also prefixed with `config.ServerName`
 (`MessageFormatter.WithServerPrefix`) since one Telegram bot/chat commonly serves several boxes.
 
+### Scheduled actions get the same treatment eventually, via backoff rather than silence
+
+Scheduled host reboots, scheduled compose restarts, per-container scheduled reboots, and the reboot
+verification check are exempted from the "stay quiet on success" rule above — a *planned* reboot is
+disruptive enough to always be worth mentioning, so `ShouldSendToTelegram` always notified their
+successes unconditionally. That's fine for a weekly or monthly schedule, but for a **nightly** one
+it reintroduces the exact noise problem `ProblemsOnly` exists to solve: an identical "it worked"
+message every single night forever, training the reader to stop reading — right up until the one
+night it actually fails and that message gets skimmed past too.
+
+**`Healer.Core.Decision.ScheduledSuccessNotificationGate`** fixes this with capped exponential
+backoff — deliberately the mirror image of `BackoffCircuitBreakerCalculator`, which backs off on
+repeated *failure* to throttle *actions*; this backs off on repeated *success* to throttle
+*notifications*. Two ints are tracked per `"ActionType:Target"` key in the new
+`HealerState.ScheduledSuccessNotify` dictionary (same granularity as `LastScheduledComposeRestartUtc`
+— one host reboot schedule and each compose project's own schedule back off independently). Count-
+based, not time-based: since these are fixed-cadence schedules, "skip N occurrences" and "skip N
+schedule cycles" are the same thing, so no extra wall-clock tracking is needed. On a success, the
+threshold doubles each time it's exceeded (1, 2, 4, 8, 16 by default, capped at `maxSkip`) before
+notifying again; on **any other outcome** for that same key — a failure, first and foremost — the
+entry is simply removed, snapping the very next success back to "notify immediately, doubling from
+scratch." Worked example with the default cap of 16, assuming every night succeeds: notifies on
+nights 1, 3, 6, 11, 20, 37, then every 17th night thereafter (54, 71, 88...) — frequent while the
+schedule is still proving itself, quiet once it's clearly reliable.
+
+**Deliberately surgical, not a rewrite of `ShouldSendToTelegram`**: the pre-existing
+`Failed`/`SkippedCircuitOpen`/`DryRun`/`_` switch is untouched — the gate only intercepts the
+`Success` case for the four eligible action types, and only *resets* (never changes the notify
+decision for) any other outcome on those same types. Every previously-tested edge case, including a
+`SkippedCooldown` status that isn't actually produced anywhere today but still defaults to
+no-notify, keeps its exact original behavior.
+
+**History is completely unaffected** — `NotifyAndRecordAsync` already separates "send to Telegram"
+from "record to history," and that split doesn't change here: every scheduled success, throttled or
+not, still gets its own row in `actions` and shows up in `healer-status`, exactly as before. This
+backoff only ever quiets the phone, never the audit trail.
+
+**Config, not a hardcoded constant** (`HealerConfig.ScheduledSuccessBackoff`, default
+`Enabled = true, MaxSkip = 16`) — unlike `RebootVerifier`'s grace window (a narrow implementation
+detail), how aggressively to quiet routine success notifications is a genuine operator preference;
+`Enabled = false` restores the exact "always notify on every success" behavior this replaces. Not
+exposed in the setup wizard, consistent with every other numeric tuning knob in this system — edit
+`/etc/healer/healer.json` directly (see `docs/README.md`'s config field reference).
+
 ## Docker integration: hand-rolled, not Docker.DotNet
 
 `Docker.DotNet`'s Native AOT/trimming support is unproven. `Healer.Host.Docker.DockerApiClient` is a
