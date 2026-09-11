@@ -121,6 +121,11 @@ host memory over the last 24h, and the tail of Healer's own log file. `sudo` is 
 reads the Docker socket the same way the daemon does — without it, container health just won't
 populate (Docker denies the socket read) even though the rest of the screen still works.
 
+Each history row includes a Reason cell, truncated to keep the table's columns aligned. Select a row
+(arrow keys) to see its full, untruncated reason — plus any error detail — word-wrapped in the
+"Reason (selected row)" panel just below the table, so a long reason is never actually hidden, just
+not crammed into one line.
+
 Keys: **Ctrl+Q** to quit. **Ctrl+E** to export the *full* log file (not just what's visible on
 screen) to a timestamped file next to it — a full-screen terminal app like this one can't be copied
 from with a normal mouse-drag selection past whatever's currently displayed, so the exported file is

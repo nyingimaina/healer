@@ -60,8 +60,28 @@ try
     trendFrame.Add(trendLabel);
 
     var actionsFrame = new FrameView { Title = "Recent incidents / actions", X = 0, Y = Pos.Bottom(trendFrame), Width = Dim.Fill(), Height = Dim.Percent(50) };
-    var actionsList = new ListView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-    actionsFrame.Add(actionsList);
+    var actionsList = new ListView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() - 4 };
+
+    // The row above is a single fixed-width line — Terminal.Gui's ListView has no per-item word-wrap,
+    // so a long reason is truncated there (see ActionHistoryFormatter.ReasonColumnMaxLength). This
+    // pane shows the full, untruncated reason (+ Detail) for whichever row is selected, with real
+    // word-wrap, so truncating the row never actually hides what went wrong from the user.
+    var reasonFrame = new FrameView { Title = "Reason (selected row)", X = 0, Y = Pos.Bottom(actionsList), Width = Dim.Fill(), Height = 4 };
+    var reasonView = new TextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), ReadOnly = true, WordWrap = true };
+    reasonFrame.Add(reasonView);
+    actionsFrame.Add(actionsList, reasonFrame);
+
+    var currentActions = new List<ActionHistoryRecord>();
+
+    void UpdateReasonPane()
+    {
+        var index = actionsList.SelectedItem;
+        reasonView.Text = index is { } i && i >= 0 && i < currentActions.Count
+            ? ActionHistoryFormatter.FormatReasonDetail(currentActions[i])
+            : "";
+    }
+
+    actionsList.ValueChanged += (_, _) => UpdateReasonPane();
 
     var logsFrame = new FrameView { Title = "Recent log lines", X = 0, Y = Pos.Bottom(actionsFrame), Width = Dim.Fill(), Height = Dim.Fill() };
     var logsView = new TextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), ReadOnly = true, WordWrap = false };
@@ -97,7 +117,10 @@ try
             trendLabel.Text = TrendSparklineRenderer.Render(bucketed);
 
             var actions = await historyStore.QueryActionsAsync(0, 100, CancellationToken.None);
+            currentActions.Clear();
+            currentActions.AddRange(actions.Items);
             actionsList.SetSource(new ObservableCollection<string>(actions.Items.Select(ActionHistoryFormatter.FormatRow)));
+            UpdateReasonPane();
 
             var logFile = LogFileReader.FindLatestLogFile(config.Logging.LogDirectory);
             currentLogFile = logFile;
