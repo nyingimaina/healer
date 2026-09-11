@@ -145,8 +145,13 @@ keystroke here beats opening another shell. There's no re-enable key here on pur
 a considered action, done via `healer-enable`.
 
 The top "Server / config" box (server name, dry-run/live mode, poll interval, notification level,
-config path, and the "⚠ HEALER IS DISABLED" banner when applicable) is always visible, separate from
-the log tail below it — so it can never scroll out of view the way a one-time startup log line would.
+config path, build version, and the "⚠ HEALER IS DISABLED" banner when applicable) is always visible,
+separate from the log tail below it — so it can never scroll out of view the way a one-time startup
+log line would. The version comes from `/opt/healer/VERSION`, written at build time by
+`deploy/build-payload.sh` (the git tag for a GitHub release, the `.deb` package version for
+`build-deb.sh`, or "dev" for an ad-hoc local build) — since there's no auto-update mechanism, this is
+the way to confirm a box is actually running the build you think it is, rather than assuming a
+`git tag && git push` alone updated anything already installed.
 
 Reads whichever config `HEALER_CONFIG_PATH` points at (default `/etc/healer/healer.json` — the same
 default the daemon uses), so it always reflects the same box the daemon is actually running on.

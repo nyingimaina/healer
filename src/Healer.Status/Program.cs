@@ -37,6 +37,11 @@ var historyStore = new SqliteHistoryStore(config.History.HistoryDbPath);
 var emergencyStopPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, "DISABLED");
 var emergencyStopSignal = new FileEmergencyStopSignal(emergencyStopPath);
 
+// /opt/healer is the fixed install location every deploy path (build-deb.sh, bootstrap.sh) writes
+// to — not user-configurable like configPath, so this is intentionally hardcoded rather than
+// derived from anything at runtime. See deploy/build-payload.sh for where VERSION is written.
+var version = VersionReader.Read("/opt/healer/VERSION");
+
 Application.Init();
 try
 {
@@ -99,7 +104,7 @@ try
             var configLines = new List<string>
             {
                 $"Server: {config.ServerName}   Mode: {(config.DryRun ? "DRY-RUN" : "LIVE")}   Poll: {config.PollIntervalSeconds}s   Notify: {config.NotificationLevel}",
-                $"Config: {configPath}",
+                $"Config: {configPath}   Version: {version}",
             };
             if (disabledReason is not null)
             {

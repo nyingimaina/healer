@@ -36,7 +36,7 @@ jobs:
             10.0.x
 
       - name: Build payload (dotnet publish + assemble — shared with deploy/build-deb.sh)
-        run: chmod +x deploy/build-payload.sh && ./deploy/build-payload.sh ${{ matrix.rid }} payload
+        run: chmod +x deploy/build-payload.sh && ./deploy/build-payload.sh ${{ matrix.rid }} payload ${{ github.ref_name }}
 
       - name: Package release tarball
         run: |

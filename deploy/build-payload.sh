@@ -13,24 +13,30 @@
 # after someone actually ran the resulting install and hit the failure for real. See
 # docs/ARCHITECTURE.md for the full history. All three now call this script instead.
 #
-# Usage: deploy/build-payload.sh <RID> <OUTPUT_DIR>
+# Usage: deploy/build-payload.sh <RID> <OUTPUT_DIR> [VERSION]
 #   RID          linux-x64 or linux-arm64. Native AOT must be published FROM that architecture — see
 #                docs/RUNBOOK.md/docs/DEPLOY-FROM-WINDOWS.md for why (no reliable cross-compilation).
 #   OUTPUT_DIR   Where the assembled payload directory tree ends up. Created if it doesn't exist.
 #                Its existing contents are NOT cleared first — the caller owns this directory and
 #                may place other things alongside the payload (e.g. build-deb.sh's DEBIAN/ dir is a
 #                sibling, not inside it).
+#   VERSION      Written verbatim to OUTPUT_DIR/VERSION — healer-status reads this back to show which
+#                build is actually running on a box, since there's no auto-update mechanism and a
+#                stale box otherwise looks identical to an upgraded one. Defaults to "dev" for a
+#                local/manual build; callers pass their own real version (build-deb.sh's package
+#                version, or release.yml's git tag).
 
 set -euo pipefail
 
-if [ $# -ne 2 ]; then
-    echo "Usage: $0 <RID> <OUTPUT_DIR>" >&2
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+    echo "Usage: $0 <RID> <OUTPUT_DIR> [VERSION]" >&2
     echo "  RID: linux-x64 or linux-arm64" >&2
     exit 1
 fi
 
 RID="$1"
 OUTPUT_DIR="$2"
+VERSION="${3:-dev}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -123,4 +129,6 @@ cp deploy/healer-disable.sh "$OUTPUT_DIR/healer-disable.sh"
 cp deploy/healer-enable.sh "$OUTPUT_DIR/healer-enable.sh"
 chmod 755 "$OUTPUT_DIR/healer-disable.sh" "$OUTPUT_DIR/healer-enable.sh"
 
-echo "== Payload ready at $OUTPUT_DIR =="
+printf '%s\n' "$VERSION" >"$OUTPUT_DIR/VERSION"
+
+echo "== Payload ready at $OUTPUT_DIR (version: $VERSION) =="

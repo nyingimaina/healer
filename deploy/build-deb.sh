@@ -48,7 +48,7 @@ mkdir -p "$PKGROOT/DEBIAN" "$PKGROOT/opt/healer" "$PKGROOT/etc/profile.d" "$PKGR
 chmod 755 "$PKGROOT/DEBIAN" # dpkg-deb requires exactly 0755-0775; belt-and-braces given the note above.
 
 chmod +x "$SCRIPT_DIR/build-payload.sh"
-"$SCRIPT_DIR/build-payload.sh" linux-x64 "$PKGROOT/opt/healer"
+"$SCRIPT_DIR/build-payload.sh" linux-x64 "$PKGROOT/opt/healer" "$VERSION"
 
 # healer-first-run.sh moves OUT of /opt/healer to its Debian-conventional /etc/profile.d location —
 # dpkg can track arbitrary install paths, unlike build-payload.sh's flat layout (shared with the
