@@ -43,6 +43,8 @@ public sealed record ThresholdsConfig(
     double ContainerMemoryCriticalPercentOfLimit = 95,
     double ContainerMemoryWarningPercentOfHostWhenNoLimit = 15,
     double ContainerMemoryCriticalPercentOfHostWhenNoLimit = 25,
+    double ContainerMemoryCriticalFairShareSafetyFactor = 0.8,
+    double ContainerMemoryWarningFairShareSafetyFactor = 0.6,
     int UnhealthyGraceSeconds = 60,
     int SustainedBreachTicksRequired = 2)
 {

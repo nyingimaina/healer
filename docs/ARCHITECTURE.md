@@ -85,6 +85,29 @@ immediately and wastes the interval in between. A human has to look and explicit
 `healer-enable`, which always prints the recorded reason before clearing the sentinel, so nobody
 clears an emergency stop blind.
 
+## Adaptive memory thresholds for containers with no `mem_limit`
+
+A real case that surfaced this: a box running a single container with no `mem_limit` set, sitting at
+a perfectly normal 27–35% of host memory, was being restarted repeatedly by Healer. The cause was
+`ContainerMemoryCriticalPercentOfHostWhenNoLimit`'s flat default of 25% — a threshold sized for a box
+with several unlimited containers competing for the same memory, applied identically to a box with
+just one. Restarting didn't help: the container's steady-state footprint is what it is, not a leak,
+so it climbed straight back to 27–35% and tripped again next tick.
+
+`Decision.AdaptiveMemoryThreshold` fixes this by scaling the no-limit fallback by a *fair share* of
+host memory: `100% / (number of unlimited containers)`, times a configurable safety factor
+(`ContainerMemoryCriticalFairShareSafetyFactor` = 0.8, `ContainerMemoryWarningFairShareSafetyFactor` =
+0.6 by default). A lone unlimited container gets an 80% critical ceiling instead of 25%; two
+unlimited containers get 40%; as more compete for the same memory, the fair share shrinks below the
+configured flat baseline, which then acts as a **floor** — this never makes the threshold *stricter*
+than today's flat behavior for a crowded box, only more lenient when there's a genuine fair-share
+justification. Critical is capped at 90% regardless (a real leak still has to trip before it OOM-kills
+the host), and warning is always kept at least 10 points below critical.
+
+Containers *with* an explicit `mem_limit` are completely untouched by this — that limit is the
+operator's own stated intent from the compose file, and `ContainerMemoryCriticalPercentOfLimit` (or a
+per-container override via `ContainerOverrides`) still governs those exactly as before.
+
 ## Telegram noise control
 
 Every notification passes through `HealingEngine.ShouldSendToTelegram`, which — under the default

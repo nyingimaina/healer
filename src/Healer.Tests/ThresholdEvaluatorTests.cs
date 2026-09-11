@@ -71,15 +71,42 @@ public class ThresholdEvaluatorTests
     }
 
     [Fact]
-    public void ContainerWithNoMemLimit_FallsBackToHostRelativeThreshold()
+    public void ContainerWithNoMemLimit_AsTheOnlyUnlimitedContainer_GetsAFairShareCeilingInsteadOfTheFlatBaseline()
+    {
+        // Real bug this guards against: a LONE unlimited container running a perfectly normal 30% of
+        // host memory was being restarted repeatedly under the old flat 25% fallback, even though
+        // nothing else on the box was competing for that memory - see AdaptiveMemoryThreshold.
+        var host = MakeHost(totalMemBytes: 1000);
+        var container = MakeContainer(memUsed: 300, memLimit: null); // 30% of host
+
+        var incidents = ThresholdEvaluator.Evaluate(host, [container], Thresholds, [], NoPreviousCounts);
+
+        Assert.DoesNotContain(incidents, i => i.Target == "app");
+    }
+
+    [Fact]
+    public void ContainerWithNoMemLimit_AsTheOnlyUnlimitedContainer_StillTripsWellAboveItsFairShare()
     {
         var host = MakeHost(totalMemBytes: 1000);
-        var container = MakeContainer(memUsed: 300, memLimit: null); // 30% of host, above the 25% critical fallback
+        var container = MakeContainer(memUsed: 850, memLimit: null); // 85% of host, above the single-container 80% ceiling
 
         var incidents = ThresholdEvaluator.Evaluate(host, [container], Thresholds, [], NoPreviousCounts);
 
         var incident = Assert.Single(incidents, i => i.Target == "app");
         Assert.Equal(IncidentSeverity.Critical, incident.Severity);
+    }
+
+    [Fact]
+    public void ContainerWithNoMemLimit_WithManyUnlimitedContainersCompeting_FallsBackToTheFlatBaseline()
+    {
+        var host = MakeHost(totalMemBytes: 1000);
+        var containers = Enumerable.Range(0, 5)
+            .Select(i => MakeContainer(name: $"app{i}", memUsed: 300, memLimit: null)) // 30% each
+            .ToList();
+
+        var incidents = ThresholdEvaluator.Evaluate(host, containers, Thresholds, [], NoPreviousCounts);
+
+        Assert.Equal(5, incidents.Count(i => i.Severity == IncidentSeverity.Critical));
     }
 
     [Fact]

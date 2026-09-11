@@ -29,6 +29,8 @@ public class HealerJsonRoundTripTests
         Assert.NotNull(config.Thresholds);
         Assert.Equal(90, config.Thresholds.HostMemoryCriticalPercent); // NOT 0 — this is the exact bug this test guards against
         Assert.Equal(2, config.Thresholds.DiskMountsToCheck.Count);
+        Assert.Equal(0.8, config.Thresholds.ContainerMemoryCriticalFairShareSafetyFactor);
+        Assert.Equal(0.6, config.Thresholds.ContainerMemoryWarningFairShareSafetyFactor);
 
         Assert.NotNull(config.RestartPolicy);
         Assert.Equal(5, config.RestartPolicy.CircuitBreakerFailureThreshold);

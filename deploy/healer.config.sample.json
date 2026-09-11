@@ -23,6 +23,8 @@
     "containerMemoryCriticalPercentOfLimit": 95,
     "containerMemoryWarningPercentOfHostWhenNoLimit": 15,
     "containerMemoryCriticalPercentOfHostWhenNoLimit": 25,
+    "containerMemoryCriticalFairShareSafetyFactor": 0.8,
+    "containerMemoryWarningFairShareSafetyFactor": 0.6,
     "unhealthyGraceSeconds": 60,
     "sustainedBreachTicksRequired": 2
   },

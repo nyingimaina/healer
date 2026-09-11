@@ -20,10 +20,14 @@ public static class ThresholdEvaluator
 
         EvaluateHost(host, thresholds, incidents);
 
+        // How many containers are competing for host memory with no mem_limit of their own - drives
+        // AdaptiveMemoryThreshold's fair-share fallback below.
+        var unlimitedContainerCount = containers.Count(c => c.MemLimitBytes is not { } limit || limit <= 0);
+
         foreach (var container in containers)
         {
             EvaluateContainerCrashLoop(container, thresholds, previousRestartCounts, incidents);
-            EvaluateContainerMemory(container, thresholds, overrides, host.TotalMemoryBytes, incidents);
+            EvaluateContainerMemory(container, thresholds, overrides, host.TotalMemoryBytes, unlimitedContainerCount, incidents);
         }
 
         return incidents;
@@ -78,10 +82,12 @@ public static class ThresholdEvaluator
         ThresholdsConfig t,
         IReadOnlyList<ContainerOverrideConfig> overrides,
         long hostTotalMemoryBytes,
+        int unlimitedContainerCount,
         List<Incident> incidents)
     {
         var overrideConfig = overrides.FirstOrDefault(o => container.Name.Contains(o.NamePattern, StringComparison.OrdinalIgnoreCase));
         var criticalPct = overrideConfig?.ContainerMemoryCriticalPercentOfLimit ?? t.ContainerMemoryCriticalPercentOfLimit;
+        var warningPct = t.ContainerMemoryWarningPercentOfLimit;
 
         double usedPct;
         string basis;
@@ -92,20 +98,20 @@ public static class ThresholdEvaluator
         }
         else if (hostTotalMemoryBytes > 0)
         {
-            // No mem_limit set: fall back to a host-relative threshold — the fix for
-            // "arbitrary containers won't reliably have a limit configured".
+            // No mem_limit set: fall back to a fair-share-adjusted host-relative threshold — see
+            // AdaptiveMemoryThreshold. A lone unlimited container gets a much higher ceiling than the
+            // flat baseline; the baseline is a floor once enough OTHER unlimited containers are
+            // competing for the same host memory.
             usedPct = 100.0 * container.MemUsedBytes / hostTotalMemoryBytes;
-            criticalPct = overrideConfig?.ContainerMemoryCriticalPercentOfLimit ?? t.ContainerMemoryCriticalPercentOfHostWhenNoLimit;
-            basis = "of total host memory (no mem_limit set)";
+            var (adaptiveWarningPct, adaptiveCriticalPct) = AdaptiveMemoryThreshold.ComputeNoLimitThresholds(unlimitedContainerCount, t);
+            criticalPct = overrideConfig?.ContainerMemoryCriticalPercentOfLimit ?? adaptiveCriticalPct;
+            warningPct = adaptiveWarningPct;
+            basis = $"of total host memory ({unlimitedContainerCount} unlimited container(s) sharing it)";
         }
         else
         {
             return;
         }
-
-        var warningPct = container.MemLimitBytes is { } l && l > 0
-            ? t.ContainerMemoryWarningPercentOfLimit
-            : t.ContainerMemoryWarningPercentOfHostWhenNoLimit;
 
         AddIfBreached(incidents, ActionType.CriticalThresholdRestart, container.Name, usedPct, warningPct, criticalPct,
             pct => $"memory at {pct:F0}% {basis}");
